@@ -1,9 +1,9 @@
 """固件备份管理（文档 2.2 / 3.8 / 7 章 Firmware-Backup-Manager）。
 
-硬规则：无成功备份，禁止任何烧录（文档 8.9）。
+硬规则：注入模式必须先有整片备份；原样烧录不要求备份。
 
 真实约束（来自本项目既有实测，勿重犯）：
-- 整片一次性 read 必 corrupt，必须 128 KB 分块 + 每块重试
+- 整片一次性 read 在 CH340 上易 corrupt，必须 64 KB 分块 + 每块重试
 - esptool 所有 argv 必须是 str（曾因传 int 触发 AttributeError）
 - macOS 上刚关闭串口就交给 esptool 会 Errno 35 独占锁残留，需退避重试
 """

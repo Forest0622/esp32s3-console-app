@@ -1,6 +1,7 @@
 """组件注入（文档 3.5.1 / 7 章 Source-Injector）。
 
-只通过 -DEXTRA_COMPONENT_DIRS 注入；绝不写用户 CMakeLists / sdkconfig / 源码。
+实现：把组件复制到工作区副本的 components/，并在副本 CMakeLists.txt 写入
+绝对路径 EXTRA_COMPONENT_DIRS、注释 MINIMAL_BUILD ON。原始工程不改。
 """
 
 from __future__ import annotations

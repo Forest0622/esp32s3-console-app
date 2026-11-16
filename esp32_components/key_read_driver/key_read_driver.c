@@ -1,5 +1,5 @@
 /*
- * key_read_driver —— KEY0..KEY3 / RESET 硬件状态只读采集
+ * key_read_driver —— KEY0..KEY3 硬件状态只读采集（RESET/BOOT 不采集）
  *
  * 硬约束（文档 8.2）：
  *   只调 gpio_get_level()，**不接管中断、不改 IOMUX、不改上下拉、不调 gpio_config**。

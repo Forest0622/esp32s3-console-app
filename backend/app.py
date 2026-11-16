@@ -4,7 +4,7 @@
     idle → 检测端口 → connected_no_fw（缺组件）→ 备份 → 编译 → 烧录 → ready
                                                         └→ 回滚 → connected_no_fw
 
-硬规则：没有成功备份，不进入任何烧录步骤（文档 8.9）。
+硬规则：注入模式必须先有整片备份；原样烧录（raw）不要求备份，但会先整片擦除。
 """
 
 from __future__ import annotations

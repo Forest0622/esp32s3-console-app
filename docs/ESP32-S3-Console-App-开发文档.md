@@ -1083,7 +1083,7 @@ set(EXTRA_COMPONENT_DIRS "<work_copy>/components")
 运行：
 
 ```bash
-/Users/xiaoyi/.espressif/tools/python/v5.5.6/venv/bin/python -m pytest tests/test_backend.py -q
+/Users/xiaoyi/.espressif/tools/python/v5.5.6/venv/bin/python tests/test_backend.py
 ```
 
 ### 16.2 真机验收（2026-11-17）

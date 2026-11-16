@@ -65,10 +65,10 @@ cd "/Users/xiaoyi/个人/单片机/ESP-S3/Project/ESP32-S3-Console-App"
 ### 运行测试
 
 ```bash
-/Users/xiaoyi/.espressif/tools/python/v5.5.6/venv/bin/python -m pytest tests/test_backend.py -q
+/Users/xiaoyi/.espressif/tools/python/v5.5.6/venv/bin/python tests/test_backend.py
 ```
 
-当前 6 组：CRC、混合流解析、烧录清单、组件注入、工程导入、IDF 预检。
+当前 6 组：CRC、混合流解析、烧录清单、组件注入、工程导入、IDF 预检。脚本不依赖 pytest，直接运行即可。
 
 ## 烧录流程
 
