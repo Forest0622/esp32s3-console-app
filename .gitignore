@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行生成物
+backups/
+workspace/
+projects_imported/
+
+# 打包产物
+mac_bundle_packager/build/
+mac_bundle_packager/assets/*.icns.tmp
+*.dmg
+
+# 测试夹具构建
+tests/fixture_project/build/
+tests/**/build/
+
+# 编辑器
+.vscode/
+.idea/

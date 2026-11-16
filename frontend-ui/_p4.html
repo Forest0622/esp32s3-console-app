@@ -1,0 +1,14 @@
+<!DOCTYPE html><html><body><iframe id="f" src="/index.html" style="width:1100px;height:800px"></iframe>
+<script>
+document.getElementById('f').onload = () => setTimeout(()=>{
+  const d = document.getElementById('f').contentDocument, r = {};
+  const b = d.getElementById('btnScan').getBoundingClientRect();
+  r.center = [Math.round(b.left+b.width/2), Math.round(b.top+b.height/2)];
+  const hit = d.elementFromPoint(b.left+b.width/2, b.top+b.height/2);
+  r.hit = hit ? (hit.id || hit.className || hit.tagName) : 'null';
+  const fl = d.getElementById('btnFlash').getBoundingClientRect();
+  r.flashHit = (d.elementFromPoint(fl.left+fl.width/2, fl.top+fl.height/2)||{}).id || '?';
+  r.flashDisabled = d.getElementById('btnFlash').disabled;
+  const o=document.createElement('div'); o.id='p4'; o.textContent=JSON.stringify(r); document.body.appendChild(o);
+}, 1500);
+</script></body></html>

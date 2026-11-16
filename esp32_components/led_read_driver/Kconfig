@@ -1,0 +1,33 @@
+menu "LED Read Driver"
+
+    config LED_READ_PIN
+        int "LED 所在 GPIO（-1 表示不采集）"
+        range -1 48
+        default 1
+        help
+            只读该脚电平，不会修改引脚配置。
+            正点原子 ATK-DNESP32S3 板载红灯为 GPIO1。
+
+    config LED_READ_ACTIVE_LOW
+        bool "低电平点亮（正点原子 ATK-DNESP32S3 板载红灯）"
+        default y
+        help
+            这块板的红灯是灌电流接法：GPIO1 拉低才亮。关掉它则按高电平点亮解释。
+
+    config LED_READ_IDLE_MS
+        int "采样间隔（毫秒）"
+        default 100
+
+    config LED_READ_WINDOW_US
+        int "采样窗口（微秒）"
+        default 4000
+        help
+            窗口内密集采样统计占空比，用于识别 LEDC 调光。
+
+    config LED_READ_PWM_EPS_PCT
+        int "静态判定阈值（百分比）"
+        default 3
+        help
+            高电平占比低于该值视为常灭，高于 100 减去该值视为常亮，其余判为 PWM。
+
+endmenu

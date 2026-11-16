@@ -1,0 +1,31 @@
+menu "Console Protocol"
+
+    choice CONSOLE_REPORT_PORT
+        prompt "上报串口"
+        default CONSOLE_REPORT_PORT_USB
+        help
+            选择主机通讯使用的串口。
+            UART0 需要压制日志，否则 ESP_LOG 会与协议帧混流导致丢帧。
+            USB-Serial-JTAG 使用板载原生 USB 口，可保留 UART0 日志。
+
+        config CONSOLE_REPORT_PORT_UART0
+            bool "UART0（默认，需压制日志）"
+
+        config CONSOLE_REPORT_PORT_USB
+            bool "USB-Serial-JTAG（保留 UART0 日志）"
+    endchoice
+
+    config CONSOLE_BAUD
+        int "上报波特率"
+        range 115200 3000000
+        default 921600
+        help
+            115200 下画面不可用（320x240 一帧 base64 需 17 秒），
+            921600 为实测可用值。
+
+    config CONSOLE_SUPPRESS_LOG
+        bool "压制全部日志（避免与协议帧混流）"
+        depends on CONSOLE_REPORT_PORT_UART0
+        default y
+
+endmenu

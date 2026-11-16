@@ -1,0 +1,15 @@
+{
+  "id": "alientek",
+  "vendor": "ALIENTEK 正点原子",
+  "description": "正点原子 lcd 驱动族（自写 SPI，绕过 esp_lcd）",
+  "symbols": [
+    "LCD_ShowPicture",
+    "lcd_color_fill"
+  ],
+  "pixel_offset_rule": "pic 指向行优先 RGB565 像素起始，无行间 padding",
+  "color_format": "rgb565",
+  "byte_swap": false,
+  "verified": false,
+  "verified_projects": [],
+  "notes": "签名需按用户工程实际 lcd.h 确认；未在真实工程实测前不得出现在可勾选列表（开发文档 8.18）"
+}

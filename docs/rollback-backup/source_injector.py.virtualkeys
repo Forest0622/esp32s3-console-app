@@ -1,0 +1,187 @@
+"""组件注入（文档 3.5.1 / 7 章 Source-Injector）。
+
+只通过 -DEXTRA_COMPONENT_DIRS 注入；绝不写用户 CMakeLists / sdkconfig / 源码。
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+from pathlib import Path
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+COMPONENTS_DIR = Path(os.environ.get("CONSOLE_APP_COMPONENTS")
+                      or APP_ROOT / "esp32_components")
+
+VALID_COMPONENTS = ("display", "led", "key")
+DIR_MAP = {
+    "display": "display_component",
+    "led": "led_read_driver",
+    "key": "key_read_driver",
+}
+# 三个组件共享的协议层，永远随任一组件注入
+ALWAYS_WITH = ("console_protocol",)
+
+
+def resolve_component_dirs(components: list[str], adapters: list[str] | None = None) -> list[str]:
+    """把勾选的组件 id 转成实际目录列表；非法 id 直接报错，不静默忽略。"""
+    bad = [c for c in components if c not in VALID_COMPONENTS]
+    if bad:
+        raise ValueError(f"未知组件：{bad}，可选 {list(VALID_COMPONENTS)}")
+
+    dirs: list[str] = []
+    if components:
+        for shared in ALWAYS_WITH:
+            p = COMPONENTS_DIR / shared
+            if not p.is_dir():
+                raise ValueError(f"缺少公共组件目录：{p}")
+            dirs.append(str(p))
+    for c in components:
+        p = COMPONENTS_DIR / DIR_MAP[c]
+        if not p.is_dir():
+            raise ValueError(f"缺少组件目录：{p}")
+        dirs.append(str(p))
+
+    for aid in (adapters or []):
+        p = COMPONENTS_DIR / "screen_adapters" / aid
+        if not p.is_dir():
+            raise ValueError(f"缺少适配包目录：{p}")
+        dirs.append(str(p))
+    return dirs
+
+
+def inject_components(work_copy: str, components: list[str],
+                      adapters: list[str] | None = None) -> list[str]:
+    """把组件目录复制进「工作区副本」的 components/ 下，返回复制后的目录列表。
+
+    为什么不再用 -DEXTRA_COMPONENT_DIRS：ESP-IDF 5.5.6 里这个变量只在工程
+    CMakeLists 的 project() 之前生效，命令行 -D 传进去实测被忽略（构建产物里
+    根本没有 key_read/led_read 的库），于是「烧进去了但板子一个包都不发」。
+    复制到副本的 components/ 是 IDF 默认扫描路径，100% 会被编进去。
+    注意只动副本，用户原始工程一个字节都不改。
+    """
+    if not Path(work_copy).is_dir():
+        raise ValueError(f"工作区副本不存在：{work_copy}")
+
+    _patch_project_cmake(Path(work_copy))
+    if "key" in components:
+        _patch_virtual_keys(Path(work_copy))
+    srcs = resolve_component_dirs(list(components), adapters)
+    dest_root = Path(work_copy) / "components"
+    dest_root.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    for src in srcs:
+        src_p = Path(src)
+        dest = dest_root / src_p.name
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        shutil.copytree(src_p, dest,
+                        ignore=shutil.ignore_patterns("build", "__pycache__", "*.o"))
+        copied.append(str(dest))
+    return copied
+
+
+VIRTUAL_MARK = "__CONSOLE_VIRTUAL_KEYS__"
+
+
+def _patch_virtual_keys(root: Path) -> None:
+    """只改工作区副本：把「屏幕按键」接进用户自己的按键处理。
+
+    屏幕上的 KEY0~KEY3 只是 UI 热区，开发板上的键挂在 XL9555 上，
+    主机没法凭空改变它的输入电平。唯一可靠的方式是在用户工程的按键循环里
+    消费一次虚拟键事件：这里给 app_main.c 的 handle_keys() 注入一段弱符号调用，
+    没注入 key 组件时弱符号为空，原样编译不受影响。
+    """
+    main = root / "main"
+    if not main.is_dir():
+        return
+    for f in sorted(main.glob("*.c")):
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        if "board_keys_raw()" not in text or "static void handle_keys(void)" not in text:
+            continue
+        if VIRTUAL_MARK in text:
+            return
+        # 在最后一条 #include 之后插弱符号声明
+        lines = text.splitlines()
+        last_inc = 0
+        for i, ln in enumerate(lines):
+            if ln.startswith("#include"):
+                last_inc = i
+        decl = ("\n/* __CONSOLE_VIRTUAL_KEYS__ 检修台注入：无 key 组件时该符号为空 */\n"
+                "extern uint16_t console_virtual_keys_take(void) __attribute__((weak));")
+        lines.insert(last_inc + 1, decl)
+        text = "\n".join(lines)
+        old = "static void handle_keys(void)\n{\n    uint16_t now_keys"
+        new = ("static void handle_keys(void)\n{\n"
+               "    /* __CONSOLE_VIRTUAL_KEYS__：先消费屏幕按键，再读实体键 */\n"
+               "    if (console_virtual_keys_take) {\n"
+               "        uint16_t vk = console_virtual_keys_take();\n"
+               "        if (vk) {\n"
+               "            if (now_ms() - s_last_key_ms >= 60) {\n"
+               "                s_last_key_ms = now_ms();\n"
+               "                apply_key(vk);\n"
+               "            }\n"
+               "            return;\n"
+               "        }\n"
+               "    }\n"
+               "    uint16_t now_keys")
+        if old not in text:
+            continue
+        f.write_text(text.replace(old, new, 1), encoding="utf-8")
+        return
+
+
+def _patch_project_cmake(root: Path) -> None:
+    """在「工作区副本」的 CMakeLists 里声明 EXTRA_COMPONENT_DIRS。
+
+    实测（IDF 5.5.6）：命令行 -DEXTRA_COMPONENT_DIRS 与 <project>/components 的
+    自动扫描在这两个工程里都没有生效（build_components 里根本没有我们的组件），
+    唯一稳定生效的位置是 project() 之前的那行 set()。所以：
+      * 只改副本，用户原始 CMakeLists 不动；
+      * 必须写**绝对路径**——相对路径会被 bootloader 子工程解析成不存在的目录而失败；
+      * 副本里的 MINIMAL_BUILD 要关掉，否则「只编 main 依赖到的组件」会把我们裁掉。
+    """
+    cm = root / "CMakeLists.txt"
+    if not cm.is_file():
+        return
+    text = cm.read_text(encoding="utf-8")
+    if "__CONSOLE_EXTRA_COMPONENTS__" in text:
+        return
+    line = (f'# __CONSOLE_EXTRA_COMPONENTS__ 由检修台注入，只存在于工作区副本\n'
+            f'set(EXTRA_COMPONENT_DIRS "{root / "components"}")\n')
+    if "include($ENV{IDF_PATH}/tools/cmake/project.cmake)" in text:
+        text = text.replace("include($ENV{IDF_PATH}/tools/cmake/project.cmake)",
+                            line + "include($ENV{IDF_PATH}/tools/cmake/project.cmake)", 1)
+    else:
+        text = line + text
+    text = text.replace("idf_build_set_property(MINIMAL_BUILD ON)",
+                        "# 注入构建：关掉 MINIMAL_BUILD，否则组件会被裁掉")
+    cm.write_text(text, encoding="utf-8")
+
+
+def inject_args(dirs: list[str]) -> str:
+    """拼成 idf.py 需要的 -D 参数（分号分隔，供 CMake 列表解析）。"""
+    if not dirs:
+        return ""
+    return "-DEXTRA_COMPONENT_DIRS=" + ";".join(dirs)
+
+
+def snapshot_key_files(work_copy: str) -> dict[str, tuple[int, float]]:
+    """记录用户工程关键文件的 (大小, mtime)，用于注入前后对比。"""
+    snap: dict[str, tuple[int, float]] = {}
+    root = Path(work_copy)
+    for pattern in ("CMakeLists.txt", "*/CMakeLists.txt", "sdkconfig",
+                    "sdkconfig.defaults", "sdkconfig.defaults.*"):
+        for f in root.glob(pattern):
+            if f.is_file():
+                st = f.stat()
+                snap[str(f)] = (st.st_size, st.st_mtime)
+    return snap
+
+
+def verify_no_touch(work_copy: str, before: dict[str, tuple[int, float]]) -> list[str]:
+    """注入后复核：返回被改动的文件（应为空列表）。"""
+    after = snapshot_key_files(work_copy)
+    changed = [p for p, v in before.items() if after.get(p) != v]
+    changed += [p for p in after if p not in before]
+    return sorted(set(changed))

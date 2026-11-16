@@ -1,0 +1,75 @@
+menu "Key Read Driver"
+
+    config KEY_READ_ACTIVE_LOW
+        bool "按键低电平有效（板载按键通常接地）"
+        default y
+
+    config KEY_READ_POLL_MS
+        int "轮询间隔（毫秒）"
+        default 10
+
+    config KEY_READ_DEBOUNCE_MS
+        int "消抖时间（毫秒，仅本地判定用，不改用户工程参数）"
+        default 20
+
+    choice KEY_READ_SOURCE
+        prompt "按键读取方式"
+        default KEY_READ_SOURCE_XL9555
+        help
+            正点原子 ATK-DNESP32S3 的 KEY0~KEY3 挂在 XL9555 的 P14~P17（不是 GPIO），
+            选 GPIO 会全部判成「未配置」。裸 GPIO 板子选 GPIO 模式。
+        config KEY_READ_SOURCE_XL9555
+            bool "XL9555 IO 扩展（ATK-DNESP32S3 板载按键）"
+        config KEY_READ_SOURCE_GPIO
+            bool "普通 GPIO"
+    endchoice
+
+    config KEY_READ_XL9555_SDA
+        int "XL9555 I2C SDA 引脚"
+        range 0 48
+        default 41
+        depends on KEY_READ_SOURCE_XL9555
+
+    config KEY_READ_XL9555_SCL
+        int "XL9555 I2C SCL 引脚"
+        range 0 48
+        default 42
+        depends on KEY_READ_SOURCE_XL9555
+
+    config KEY_READ_XL9555_ADDR
+        hex "XL9555 I2C 地址"
+        default 0x20
+        depends on KEY_READ_SOURCE_XL9555
+
+    config KEY_READ_XL9555_BASE_BIT
+        int "KEY3 所在位（KEY0 依次 +3）"
+        range 0 4
+        default 4
+        depends on KEY_READ_SOURCE_XL9555
+
+    config KEY_READ_KEY0
+        int "KEY0 所在 GPIO（-1 表示不采集）"
+        range -1 48
+        default -1
+
+    config KEY_READ_KEY1
+        int "KEY1 所在 GPIO（-1 表示不采集）"
+        range -1 48
+        default -1
+
+    config KEY_READ_KEY2
+        int "KEY2 所在 GPIO（-1 表示不采集）"
+        range -1 48
+        default -1
+
+    config KEY_READ_KEY3
+        int "KEY3 所在 GPIO（-1 表示不采集）"
+        range -1 48
+        default -1
+
+    config KEY_READ_RESET
+        int "RESET 所在 GPIO（通常接 EN，非 GPIO，默认 -1）"
+        range -1 48
+        default -1
+
+endmenu

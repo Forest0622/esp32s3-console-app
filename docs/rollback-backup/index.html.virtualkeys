@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>ESP32-S3 检修台</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#151b24; --panel2:#1b222d; --line:#2a3441;
+    --txt:#e6edf3; --sub:#8b98a8; --accent:#39c5bb; --warn:#e0a458; --err:#e05c5c; --ok:#4caf72;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.5 -apple-system,"PingFang SC","Helvetica Neue",sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:14px 20px;
+         border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.5px}
+  .badge{padding:3px 10px;border-radius:999px;font-size:12px;border:1px solid var(--line)}
+  .badge.ok{color:var(--ok);border-color:#2d5138;background:#12281b}
+  .badge.warn{color:var(--warn);border-color:#4a3a22;background:#2a2113}
+  .badge.err{color:var(--err);border-color:#4a2424;background:#2a1414}
+  .badge.idle{color:var(--sub)}
+  main{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+       gap:14px;padding:14px 20px;align-items:start}
+  .boardCard{grid-column:1 / -1}
+  .modules{display:grid;grid-template-columns:1.18fr 1fr 1fr;gap:14px;
+           grid-column:1 / -1;align-items:start}
+  .modules .card{margin-top:0 !important}
+  .mod{font-size:10px;color:#4f6b83;letter-spacing:.6px;margin-right:8px;
+       border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+  .sub{font-size:11px;color:var(--sub);letter-spacing:.4px;margin-bottom:4px}
+  main{grid-template-columns:1fr !important}
+  .notice{margin:10px 0 0;padding:9px 12px;border-radius:9px;border:1px solid #6a4a12;
+          background:#2a2113;color:#ffcc7a;font-size:12px;line-height:1.55}
+  .notice.hidden{display:none}
+  /* 自绘模态：WKWebView 不实现 WKUIDelegate，alert()/confirm() 会被静默吞掉，
+     所有"必须让用户看见"的提醒都走这个层，绝不能用原生 confirm。 */
+  .modal{position:fixed;inset:0;background:rgba(4,7,12,.72);display:flex;
+         align-items:center;justify-content:center;z-index:1200}
+  .modal.hidden{display:none}
+  .modal .box{width:min(520px,86vw);background:#0f1720;border:1px solid #33475c;
+              border-radius:14px;padding:18px 20px;box-shadow:0 18px 48px rgba(0,0,0,.55)}
+  .modal h3{margin:0 0 8px;font-size:15px;color:#f0f6fc}
+  .modal .txt{font-size:12.5px;line-height:1.7;color:#b9c7d6;white-space:pre-wrap}
+  .modal .warn{margin:10px 0 0;padding:9px 11px;border-radius:9px;background:#2a1a08;
+                border:1px solid #6a4a12;color:#ffcf8a;font-size:12px;line-height:1.6}
+  .modal .acts{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+  .modal .acts button{padding:8px 14px;border-radius:9px;border:1px solid #33475c;
+                      background:#16212c;color:#dbe7f3;font-size:12.5px;cursor:pointer}
+  .modal .acts button.primary{background:#1f4f7a;border-color:#2f6491;color:#fff}
+  .modal .acts button.danger{background:#5a1f22;border-color:#8b2f34;color:#ffe3e3}
+  .overlay{border-top:1px solid var(--line)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .card h2{font-size:13px;margin:0;padding:10px 14px;color:var(--sub);
+           border-bottom:1px solid var(--line);font-weight:500;letter-spacing:.5px}
+  .card .body{padding:12px}
+  /* 官方渲染底板 + 逐针标注舞台：坐标基准 1569×894，标注按 1046×596 折算百分比 */
+  #viewport{position:relative;overflow:hidden;background:#05080c;height:clamp(320px,56vh,900px);
+            cursor:grab;border-bottom:1px solid var(--line)}
+  #viewport.drag{cursor:grabbing}
+  #stage{position:absolute;left:0;top:0;width:1569px;height:894px;transform-origin:0 0;
+         will-change:transform;filter:drop-shadow(0 18px 40px rgba(0,0,0,.55))}
+  #board{width:1569px;display:block;user-select:none;-webkit-user-drag:none}
+  #screenbox{position:absolute;left:12.33%;top:32.38%;width:37.00%;height:48.83%;overflow:hidden;
+             border-radius:2px;background:#000;box-shadow:inset 0 0 10px rgba(0,0,0,.75)}
+  #screen{width:100%;height:100%;display:block;image-rendering:pixelated}
+  #pins{position:absolute;inset:0;pointer-events:none}
+  .cap{position:absolute;transform:translate(-50%,-50%);font-size:8.5px;padding:2px 5px;border-radius:4px;
+       background:rgba(8,13,22,.9);border:1px solid rgba(96,170,255,.5);color:#dcecff;white-space:nowrap;
+       letter-spacing:.2px;box-shadow:0 1px 4px rgba(0,0,0,.55)}
+  .cap b{color:#8fd0ff;font-weight:600}
+  .pdot{position:absolute;transform:translate(-50%,-50%);width:3px;height:3px;border-radius:1px;
+        background:#8fd8ff;box-shadow:0 0 3px 1px rgba(110,200,255,.65)}
+  .ptag{position:absolute;transform:translate(-50%,-50%);font-size:7.5px;line-height:1.1;
+        padding:1px 2.5px;border-radius:2px;background:rgba(6,10,17,.94);
+        border:1px solid rgba(96,170,255,.42);color:#d8ecff;white-space:nowrap}
+  .ptag i{font-style:normal;color:#ffd166;margin-left:2px}
+  .ptag.gnd{color:#9bffc4;border-color:rgba(61,220,151,.45)}
+  .ptag.pwr3{color:#ffd98a;border-color:rgba(255,196,80,.45)}
+  .hbox{position:absolute;transform:translate(-50%,-50%);border:1px dashed rgba(96,170,255,.5);
+        border-radius:5px;background:linear-gradient(rgba(60,140,255,.06),rgba(60,140,255,.02))}
+  .zone{position:absolute;transform:translate(-50%,-50%);border-radius:2px;pointer-events:none}
+  .zone .aura{position:absolute;left:50%;top:50%;width:300%;height:470%;transform:translate(-50%,-50%);
+    border-radius:50%;opacity:.05;margin:-1px;
+    background:radial-gradient(circle,rgba(255,72,54,.92) 0%,rgba(255,44,34,.42) 34%,rgba(200,16,10,.14) 58%,rgba(150,0,0,0) 76%)}
+  .zone .core{position:absolute;inset:0;border-radius:2px;opacity:.08;
+    background:radial-gradient(ellipse at 50% 42%,#fff 0%,#fff 14%,#ffb9b1 30%,#ff3a2e 62%,#8d0d06 100%);
+    box-shadow:inset -1px -1px 2px rgba(0,0,0,.65), inset 1px 1px 1px rgba(255,255,255,.5)}
+  .zone.on .core{opacity:1}.zone.on .aura{opacity:.9}
+  .zone.pwm .core{opacity:.75}.zone.pwm .aura{opacity:.55}
+  .zone.pwr .aura{margin:-1px;
+    background:radial-gradient(circle,rgba(130,215,255,.95) 0%,rgba(70,175,255,.45) 34%,rgba(25,120,220,.15) 58%,rgba(10,80,180,0) 76%)}
+  .zone.pwr .core{
+    background:radial-gradient(ellipse at 50% 42%,#fff 0%,#fff 14%,#d7f2ff 30%,#42a8ff 62%,#0a3a70 100%);
+    box-shadow:inset -1px -1px 2px rgba(0,0,0,.6), inset 1px 1px 1px rgba(255,255,255,.55)}
+  .hot{position:absolute;transform:translate(-50%,-50%);border-radius:9px;cursor:pointer;
+       border:1px solid transparent;transition:.12s;pointer-events:auto}
+  .hot:hover{border-color:rgba(78,161,255,.8);background:rgba(78,161,255,.14);
+             box-shadow:0 0 0 3px rgba(78,161,255,.12)}
+  .hot:active{background:rgba(78,161,255,.3)}
+  .hot.press{border-color:var(--ok);background:rgba(61,220,151,.24)}
+  .hot .tag{position:absolute;left:50%;bottom:-15px;transform:translateX(-50%);font-size:10px;
+            color:#9fd2ff;background:rgba(6,11,18,.92);padding:1px 4px;border-radius:3px;white-space:nowrap;
+            opacity:0;transition:.15s}
+  .hot:hover .tag,.hot.always .tag{opacity:1}
+  /* 状态浮层：压在舞台左下角，不遮住板子 */
+  .overlay{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 16px;
+           background:var(--panel2);border-top:1px solid var(--line)}
+  .overlay.hidden{display:none}
+  #viewTools{position:absolute;right:12px;top:10px;display:flex;gap:6px;z-index:2}
+  #viewTools button{padding:5px 9px;font-size:11px;background:rgba(12,20,30,.85)}
+  .overlay .big{font-size:15px;color:var(--warn)}
+  .overlay .small{font-size:12px;color:var(--sub);max-width:340px}
+  /* 停止按钮：只有任务在跑时才出现，平时不占位 */
+  .hidden{display:none !important}
+  /* 访达图标：平时只有一个小图标，鼠标移上去才浮出文字（用户口径） */
+  .icon-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;
+    width:20px;height:20px;padding:0;border-radius:5px;background:transparent;
+    border:1px solid var(--line);color:var(--sub);cursor:pointer;flex:none;transition:.12s}
+  .icon-btn:hover{color:var(--fg);border-color:var(--accent);background:rgba(90,160,255,.12)}
+  .icon-btn svg{pointer-events:none}
+  .icon-tip{position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%) scale(.96);
+    white-space:nowrap;font-size:11px;line-height:1;color:var(--fg);background:#1d2430;
+    border:1px solid var(--line);border-radius:5px;padding:5px 7px;opacity:0;pointer-events:none;
+    transition:opacity .12s,transform .12s;z-index:30}
+  .icon-btn:hover .icon-tip{opacity:1;transform:translateX(-50%) scale(1)}
+  .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  .metric{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .metric .k{font-size:11px;color:var(--sub)}
+  .metric .v{font-size:13px;margin-top:3px;word-break:break-all}
+  .led{display:flex;align-items:center;gap:10px;padding:8px 0}
+  .dot{width:14px;height:14px;border-radius:50%;background:#333;box-shadow:0 0 0 1px #000 inset}
+  .dot.on{background:var(--accent);box-shadow:0 0 10px var(--accent)}
+  .dot.pwm{background:var(--warn);box-shadow:0 0 10px var(--warn)}
+  .keys{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .key{background:var(--panel2);border:1px solid var(--line);border-radius:9px;
+       padding:10px 6px;text-align:center;cursor:pointer;user-select:none;
+       transition:.12s;font-size:12px}
+  .key:hover{border-color:#3c4a5c}
+  .key.active{background:#213b3a;border-color:var(--accent);color:var(--accent)}
+  .key small{display:block;color:var(--sub);font-size:10px;margin-top:3px}
+  .row{display:flex;gap:8px;align-items:center}
+  .row + .row{margin-top:10px}
+  input[type=text]{flex:1;background:#0b0f14;border:1px solid var(--line);border-radius:8px;
+                   color:var(--txt);padding:8px 10px;font-size:12px}
+  button{background:#1f2a36;border:1px solid var(--line);color:var(--txt);
+         border-radius:8px;padding:8px 12px;font-size:12px;cursor:pointer}
+  button:hover:not(:disabled){border-color:#3c4a5c}
+  button.primary{background:#12433f;border-color:#1d5f59;color:#bff5ef}
+  button.danger{background:#3a1c1c;border-color:#5a2a2a;color:#f2c1c1}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .check{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub)}
+  select{background:#0b0f14;border:1px solid var(--line);color:var(--txt);
+         border-radius:8px;padding:7px 9px;font-size:12px}
+  .bar{height:6px;background:#0b0f14;border-radius:999px;overflow:hidden;margin-top:8px}
+  .bar > i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+  #log{font:11px/1.5 Menlo,monospace;color:#93a1b1;max-height:72px;overflow:auto;
+       white-space:pre-wrap;background:#0b0f14;border:1px solid var(--line);border-radius:8px;
+       padding:8px 10px;margin-top:10px}
+  .hint{font-size:12px;color:var(--warn);margin-top:8px;min-height:16px}
+  .tiny{font-size:11px;color:var(--sub)}
+  .tip{font-style:normal;font-size:10px;color:#5a7183;margin-left:4px}
+  .mode{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;margin-top:6px;
+        border:1px solid var(--line);border-radius:9px;background:#11161d;cursor:pointer;
+        transition:border-color .15s,background .15s}
+  .mode:hover{border-color:#2d4356}
+  .mode:has(input:checked){border-color:#2f6491;background:#132030}
+  .mode input{margin-top:2px}
+  .mode b{display:block;font-size:12px;color:#e6edf3;font-weight:600;margin-bottom:2px}
+  .mode span{display:block}
+  .mode span{font-size:11px;color:var(--sub);line-height:1.5}
+  #viewport.dragging{cursor:grabbing}
+  #viewport{cursor:grab}
+</style>
+</head>
+<body>
+<header>
+  <h1>ESP32-S3 检修台</h1>
+  <span id="statusBadge" class="badge idle">未连接</span>
+  <span id="portLabel" class="tiny">—</span>
+  <span style="flex:1"></span>
+  <span id="fpsLabel" class="tiny">0 fps</span>
+</header>
+
+<main>
+  <!-- 模块① 板图（主视觉） -->
+  <section class="card boardCard">
+    <h2><span class="mod">模块①</span>板图 · 逐针标注 · 实时画面</h2>
+    <div id="viewport">
+      <div id="stage">
+        <img id="board" src="/assets/board.png" draggable="false"
+             alt="ATK-DNESP32S3 V1.3 官方渲染图">
+        <div id="screenbox"><canvas id="screen" width="320" height="240"></canvas></div>
+        <div id="pins"></div>
+
+        <!-- 物理按键热区（按官方渲染图 1569×894 量取） -->
+        <div class="hot" data-n="4" style="left:63.57%;top:91.78%;width:3.3%;height:5.6%"><span class="tag">RESET</span></div>
+        <div class="hot" data-n="5" style="left:68.55%;top:91.78%;width:3.3%;height:5.6%"><span class="tag">BOOT</span></div>
+        <div class="hot" data-n="2" style="left:74.76%;top:91.78%;width:3.3%;height:5.6%"><span class="tag">KEY2</span></div>
+        <div class="hot" data-n="1" style="left:81.07%;top:91.78%;width:3.3%;height:5.6%"><span class="tag">KEY1</span></div>
+        <div class="hot always" data-n="0" style="left:88.43%;top:91.78%;width:3.3%;height:5.6%"><span class="tag">KEY0</span></div>
+        <div class="hot" data-n="3" style="left:79.67%;top:81.32%;width:3.82%;height:6.71%"><span class="tag">KEY3</span></div>
+      </div>
+
+      <div id="viewTools">
+        <button id="btnFit" onclick="fitStage()">适应窗口</button>
+        <button id="btnOne" onclick="oneToOne()">1:1</button>
+      </div>
+    </div>
+
+    <div id="notice" class="notice hidden"></div>
+<div id="modal" class="modal hidden"><div class="box">
+  <h3 id="modalTitle">提示</h3>
+  <div class="txt" id="modalText"></div>
+  <div class="warn hidden" id="modalWarn"></div>
+  <div class="acts">
+    <button id="modalCancel">取消</button>
+    <button id="modalOk" class="primary">确定</button>
+  </div>
+</div></div>
+
+    <div id="overlay" class="overlay">
+      <div style="min-width:180px;flex:1">
+        <div class="big" id="overlayTitle">未连接开发板</div>
+        <div class="small" id="overlayText">插上 S3 开发板后自动识别端口</div>
+      </div>
+      <button id="btnScan" title="重新扫描端口并握手；已连接时等价于刷新状态">检测 / 自检</button>
+      <button id="btnFlash" class="primary" disabled>刷录固件</button>
+      <button id="btnStop" class="danger hidden" title="停止正在进行的任务">■ 停止</button>
+    </div>
+  </section>
+
+  <!-- 模块② 设备与日志 / 模块③ 实时状态 / 模块④ 工程与烧录 -->
+  <div class="modules">
+    <div class="card">
+      <h2><span class="mod">模块②</span>设备与日志</h2>
+      <div class="body">
+        <div class="tiny" id="connLine" style="margin:-2px 0 8px">未连接</div>
+        <div class="metrics">
+          <div class="metric"><div class="k">端口</div><div class="v" id="mPort">—</div></div>
+          <div class="metric"><div class="k">芯片 ID</div><div class="v" id="mChip">—</div></div>
+          <div class="metric"><div class="k">固件</div><div class="v" id="mFw">—</div></div>
+          <div class="metric"><div class="k">组件</div><div class="v" id="mComp">—</div></div>
+        </div>
+        <div class="hint" id="hintLine"></div>
+        <div class="bar"><i id="progBar"></i></div>
+        <div class="tiny" id="progText" style="margin-top:5px"></div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
+          <div class="tiny" id="backupHint" style="margin:0">尚无整片备份：烧录会被拒绝</div>
+          <button id="btnFinder" class="icon-btn" aria-label="在访达中打开备份文件夹">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2h7A1.5 1.5 0 0 1 19 8.5v9A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/>
+            </svg>
+            <span class="icon-tip">在访达中打开</span>
+          </button>
+        </div>
+        <div id="log">等待操作…</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="mod">模块③</span>实时状态 · 灯 / 键</h2>
+      <div class="body">
+        <div class="sub">板载指示灯 <i class="tip">板子自己点亮的灯，只读，不改你的驱动</i></div>
+        <div id="ledList" class="tiny">缺少驱动</div>
+        <div class="sub" style="margin-top:12px">板载按键 <i class="tip">只显示物理按下状态，不定义功能</i></div>
+        <div class="keys">
+          <div class="key" data-idx="0">KEY0<small>—</small></div>
+          <div class="key" data-idx="1">KEY1<small>—</small></div>
+          <div class="key" data-idx="2">KEY2<small>—</small></div>
+          <div class="key" data-idx="3">KEY3<small>—</small></div>
+          <div class="key" data-idx="4">RESET<small>—</small></div>
+          <div class="key" data-idx="5">BOOT<small>—</small></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="mod">模块④</span>工程与烧录</h2>
+      <div class="body">
+        <div class="sub">第一步 · 选择工程 <i class="tip">ESP-IDF 工程文件夹，或 zip 压缩包</i></div>
+        <div class="row">
+          <input id="srcPath" type="text" value="/Users/xiaoyi/Desktop/ATK-DNESP32S3-Dashboard-Local" placeholder="点右侧按钮用访达选择，也可直接粘路径">
+          <button id="btnPick">选择…</button>
+        </div>
+        <div class="tiny" id="importInfo" style="margin-top:6px">尚未导入工程</div>
+
+        <div class="sub" style="margin-top:12px">第二步 · 选择烧录方式</div>
+        <label class="mode"><input type="radio" name="burnMode" id="rInject" checked>
+          <b>注入组件</b><span>在你的工程里加只读上报组件，本台就能看画面/灯态/按键</span></label>
+        <label class="mode"><input type="radio" name="burnMode" id="rRaw">
+          <b>原样烧录</b><span>完全不改你的代码，按工程原本的样子编译烧录</span></label>
+        <div class="tiny" id="modeHint" style="margin-top:6px"></div>
+
+        <div id="compBox" style="margin-top:8px">
+          <div class="row" style="flex-wrap:wrap">
+            <label class="check"><input type="checkbox" id="cDisplay" checked>画面</label>
+            <label class="check"><input type="checkbox" id="cLed" checked>指示灯</label>
+            <label class="check"><input type="checkbox" id="cKey" checked>按键</label>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <select id="adapterSel" style="width:100%"><option value="">适配包：暂无可用</option></select>
+          </div>
+        </div>
+
+        <div class="sub" style="margin-top:12px">第三步 · 备份与烧录</div>
+        <div class="row" style="flex-wrap:wrap">
+          <button id="btnBackup">备份原固件</button>
+          <button id="btnBuild" class="primary">编译并烧录（注入组件）</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="btnRollback" class="danger">一键恢复原固件</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label class="check"><input type="checkbox" id="chkFull">完整备份（逐字节读满整片，慢）</label>
+        </div>
+        <div class="tiny" style="margin-top:8px">
+          默认「快速备份」：只读分区表覆盖到的区域，空白区不读、回滚时整片擦除还原——
+          空片十几秒，正常工程一般 1–4 MB。<br>
+          ESC 串口是硬上限（CH340 实测约 20 KB/s），整片 16 MB 逐字节读要十几分钟，勾上「完整备份」才会那样读。<br>
+          注入组件必须有整片备份，否则编译烧录会被拒绝。
+        </div>
+      </div>
+    </div>
+  </div>
+  </main>
+
+<script>
+const $ = id => document.getElementById(id);
+let lastSeq = -1, stateData = null;
+
+async function api(path, body){
+  const opt = body ? {method:'POST',headers:{'Content-Type':'application/json'},
+                      body:JSON.stringify(body)} : {};
+  const r = await fetch(path, opt);
+  try { return await r.json(); } catch(e){ return {ok:false,error:'bad json'}; }
+}
+
+const STATUS = {
+  idle:            ['idle','未连接'],
+  no_device:       ['warn','未检测到设备'],
+  connecting:      ['warn','连接中'],
+  connected_no_fw: ['err','缺少画面固件'],
+  ready:           ['ok','已连接'],
+  busy:            ['warn','处理中'],
+  error:           ['err','出错']
+};
+
+function setBadge(st){
+  const [cls,txt] = STATUS[st] || ['idle', st];
+  const b = $('statusBadge');
+  b.className = 'badge ' + cls;
+  b.textContent = txt;
+  const line = $('connLine');
+  if(line){
+    const s = stateData || {};
+    line.textContent = txt + (s.port ? ' · ' + s.port : '') +
+      (s.report_port === 'usb_serial_jtag' ? ' · 原生 USB' : '');
+    line.style.color = cls === 'ok' ? 'var(--accent)' : (cls === 'err' ? '#e0a458' : 'var(--sub)');
+  }
+}
+
+function renderLed(led){
+  const el = $('ledList');
+  if(!led || !led.length){ el.innerHTML = '<span style="color:#e0a458">缺少驱动</span>'; return; }
+  el.innerHTML = led.map(p=>{
+    /* 这块板红灯是低电平点亮：active_low=1 时 level=0 才是亮。
+       早先只看 level，板子亮着界面却说「亮」方向反了或一直「灭」。 */
+    const lit = p.pwm ? (p.duty_pct > 0)
+                      : (p.active_low ? (p.level === 0) : (p.level === 1));
+    const cls = p.pwm ? 'dot pwm' : (lit ? 'dot on' : 'dot');
+    const text = p.pwm ? `PWM ${p.duty_pct}%` : (lit ? '亮' : '灭');
+    return `<div class="led"><span class="${cls}"></span>
+            <span>${p.pin} · ${text}</span></div>`;
+  }).join('');
+}
+
+function renderKeys(key){
+  const map = (key && key.state) || {};
+  document.querySelectorAll('.key').forEach(el=>{
+    const name = ['KEY0','KEY1','KEY2','KEY3','RESET','BOOT'][+el.dataset.idx];
+    const v = map[name];
+    const small = el.querySelector('small');
+    if(v === undefined || v === null || v === -1){
+      small.textContent = '未配置'; el.classList.remove('active');
+    } else {
+      small.textContent = v ? '按下' : '松开';
+      el.classList.toggle('active', !!v);
+    }
+  });
+}
+
+function drawFrame(){
+  const img = new Image();
+  img.onload = () => {
+    const c = $('screen'), ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    $('overlay').classList.add('hidden');
+  };
+  img.onerror = () => { /* 无帧：保持遮罩 */ };
+  img.src = '/api/frame.bmp?t=' + Date.now();
+}
+
+
+/* ---------- 官方渲染底板：逐针 / 逐模块标注（常显，图形化手册级） ---------- */
+const IW = 1046, IH = 596;                 // 标注坐标基准（与底图 1569×894 同比例）
+const pinsEl = () => $('pins');
+let STAGE = {scale: 1, x: 0, y: 0};
+let zoomFit = 0.7;   // 适应窗口时的基准缩放，用来判断是否处于「放大态」
+
+function pct(v,total){ return (v/total*100).toFixed(3)+'%'; }
+function node(cls,x,y){
+  const d = document.createElement('div');
+  d.className = cls;
+  d.style.left = pct(x,IW); d.style.top = pct(y,IH);
+  $('pins').appendChild(d); return d;
+}
+function cap(x,y,html){ const d = node('cap',x,y); d.innerHTML = html; return d; }
+function pin(x,y,name,dir=-1,sub='',tone=''){
+  node('pdot',x,y);
+  const d = node('ptag', x, y + dir*10.5);
+  d.innerHTML = name + (sub ? '<i>'+sub+'</i>' : '');
+  if(tone) d.className += ' ' + tone;
+  return d;
+}
+function pinAt(x,y,tx,ty,name,tone=''){
+  node('pdot',x,y);
+  const d = node('ptag', tx, ty);
+  d.innerHTML = name;
+  if(tone) d.className += ' ' + tone;
+  return d;
+}
+function row(x0,y,dx,n,names,dir=-1,tones){
+  for(let i=0;i<n;i++) pin(x0+dx*i, y, names[i] || ('#'+(i+1)), dir, '', tones ? (tones[i]||'') : '');
+}
+function box(x,y,w,h){ const b = node('hbox',x,y); b.style.width = pct(w,IW); b.style.height = pct(h,IH); return b; }
+
+function buildBoard(){
+  const pins = $('pins');
+  if(pins.dataset.built) return;
+  pins.dataset.built = '1';
+
+  /* P1 2×12 扩展排针：24 针逐个 */
+  const P1_TOP = ["IO5","IO7","IO16","IO15","IO46","IO10","IO47","IO45","IO38","IO36","IO19","GND"];
+  const P1_BOT = ["IO4","IO6","IO15","IO17","IO3","IO9","IO14","IO48","IO39","IO35","IO37","IO20"];
+  const P1_X0 = 519.33, P1_DX = 20.7, P1_YT = 96.0, P1_YB = 115.33;   // 1569×894 底图实测孔心：x=779+31.05i，y=144/173
+  box(P1_X0 + P1_DX*5.5, (P1_YT+P1_YB)/2, P1_DX*12 + 12, 34);
+  row(P1_X0, P1_YT, P1_DX, 12, P1_TOP, -1, P1_TOP.map(n=>n==="GND"?"gnd":''));
+  row(P1_X0, P1_YB, P1_DX, 12, P1_BOT, +1);
+  cap(P1_X0 + P1_DX*5.5, 74, "<b>P1</b> 2×12 扩展排针 · 上排 12 / 下排 12");
+
+  /* P2 底部 2×9：18 针（底图孔心 x=142+31.75i，y=802.5/834） */
+  const P2_TOP = ["GND","SCL","SDA","D0","D2","D4","D6","CLK","PWD"];
+  const P2_BOT = ["3V3","VS","HR","RST","D1","D3","D5","D7","NC"];
+  const P2_X0 = 94.67, P2_DX = 21.17, P2_YT = 535.0, P2_YB = 556.0;
+  box(P2_X0 + P2_DX*4, (P2_YT+P2_YB)/2, P2_DX*9 + 10, 34);
+  row(P2_X0, P2_YT, P2_DX, 9, P2_TOP, -1, P2_TOP.map(n=>n==="GND"?"gnd":''));
+  row(P2_X0, P2_YB, P2_DX, 9, P2_BOT, +1);
+  cap(P2_X0 + P2_DX*4, 515, "<b>P2</b> 2×9 扩展排针（18 针，GPIO 直出）");
+
+  /* P3 ATK MODULE 排母：6 针（底图孔心 x=155.7+31.82i，y=157.5） */
+  const P3_NAMES = ["LED","KEY","RXD","TXD","GND","5V"];
+  const P3_X0 = 103.8, P3_DX = 21.21, P3_Y = 105.0;
+  box(P3_X0 + P3_DX*2.5, P3_Y, P3_DX*6 + 10, 26);
+  row(P3_X0, P3_Y, P3_DX, 6, P3_NAMES, -1, P3_NAMES.map(n=>n==="GND"?"gnd":''));
+  cap(P3_X0 + P3_DX*2.5, 82, "<b>P3</b> ATK MODULE 模块扩展排母（6 针）");
+
+  /* P4 UART0 2×3：左列 GND/U0TX/RXD，右列 5V/U0RX/TXD（底图 x=420/452，y=135/172/209） */
+  const P4_L = ["GND","U0TX","RXD"], P4_R = ["5V","U0RX","TXD"];
+  const P4_XL = 280.0, P4_XR = 301.3, P4_Y = 90.0, P4_DY = 23.3;
+  box((P4_XL+P4_XR)/2, P4_Y + P4_DY, P4_XR-P4_XL + 18, P4_DY*2 + 14);
+  P4_L.forEach((n,i)=>pinAt(P4_XL, P4_Y + P4_DY*i, P4_XL - 16, P4_Y + P4_DY*i, n, n==="GND"?"gnd":''));
+  P4_R.forEach((n,i)=>pinAt(P4_XR, P4_Y + P4_DY*i, P4_XR + 16, P4_Y + P4_DY*i, n, n==="5V"?"pwr3":''));
+  cap((P4_XL+P4_XR)/2, 74, "<b>P4 / UART0</b> 跳线（2×3）");
+
+  /* 左侧 P5 电源排针：4 针（底图孔心 x=80，y=454.5/485.6/517.5/548.6） */
+  const P5_NAMES = ["5V","IN","OUT","GND"];
+  const P5_X = 53.3, P5_Y = 303.0, P5_DY = 20.9;
+  box(P5_X + 4, P5_Y + P5_DY*1.5, 20, P5_DY*4 + 8);
+  P5_NAMES.forEach((n,i)=>pinAt(P5_X, P5_Y + P5_DY*i, 77, P5_Y + P5_DY*i, n, n==="GND"?"gnd":(n==="5V"?"pwr3":'')));
+  cap(120, 280, "<b>P5</b> 电源排针（4P）· 5V / IN / OUT / GND");
+
+  /* 右侧 VOUT2 / VOUT1 */
+  const V_X = 963.3, V_DX = 22, V_Y2 = 242.7, V_Y1 = 298;
+  box(V_X + V_DX, V_Y2, V_DX*2 + 16, 16); box(V_X + V_DX, V_Y1, V_DX*2 + 16, 16);
+  row(V_X, V_Y2, V_DX, 3, ['V2-1','V2-2','V2-3'], -1);
+  row(V_X, V_Y2 + 20, V_DX, 3, ['V2-4','V2-5','V2-6'], +1);
+  row(V_X, V_Y1, V_DX, 3, ['V1-1','V1-2','V1-3'], -1);
+  row(V_X, V_Y1 + 20.7, V_DX, 3, ['V1-4','V1-5','V1-6'], +1);
+  cap(V_X + V_DX, 222, "<b>VOUT2</b> 3×2 输出端子");
+  cap(V_X + V_DX, 340, "<b>VOUT1</b> 3×2 输出端子");
+
+  /* PHONE 3 针 */
+  const PH_X = 934, PH_DX = 21.3, PH_Y = 376.7;
+  box(PH_X + PH_DX, PH_Y, PH_DX*2 + 14, 18);
+  row(PH_X, PH_Y, PH_DX, 3, ['PH-1','PH-2','PH-3'], -1);
+  cap(PH_X + PH_DX, 398, "<b>PHONE</b> 3P 螺丝端子");
+
+  /* P6 ATK MODULE 扩展接口 2×3：左 IIC_INT/IO0/1WIRE_DQ，右 SPI_MISO/IO_SEL/LCD_DC */
+  const P6_L = ["IIC_INT","IO0","1WIRE_DQ"], P6_R = ["SPI_MISO","IO_SEL","LCD_DC"];
+  const P6_XL = 402.7, P6_XR = 423.3, P6_Y = 524.0, P6_DY = 26.3;
+  box((P6_XL+P6_XR)/2, P6_Y + P6_DY, P6_XR-P6_XL + 30, P6_DY*2 + 18);
+  P6_L.forEach((n,i)=>pinAt(P6_XL, P6_Y + P6_DY*i, P6_XL - 20, P6_Y + P6_DY*i, n));
+  P6_R.forEach((n,i)=>pinAt(P6_XR, P6_Y + P6_DY*i, P6_XR + 20, P6_Y + P6_DY*i, n));
+  cap((P6_XL+P6_XR)/2, 490, "<b>P6</b> ATK MODULE 扩展接口（2×3）");
+
+  /* 4P PH2.0 */
+  const F4_X = 505, F4_DX = 19, F4_Y = 534;
+  box(F4_X + F4_DX*1.5, F4_Y, F4_DX*3 + 14, 16);
+  row(F4_X, F4_Y, F4_DX, 4, ['4P-1','4P-2','4P-3','4P-4'], -1);
+  cap(F4_X + F4_DX*1.5, 506, "<b>4P</b> PH2.0 排针");
+
+  /* 模块级标注 */
+  cap(460, 168, "<b>LCD FPC</b> 40P 排线座");
+  cap(952, 60, "<b>TF</b> Micro SD 卡座（自锁）");
+  cap(872, 190, "<b>U4</b> ATK-MWS3S Wi-Fi / BLE 模组");
+  cap(770, 236, "<b>SPEAKER</b> 喇叭接口");
+  cap(996, 108, "<b>ON/OFF</b> 电源拨动开关");
+  cap(940, 470, "<b>RV1</b> 电位器（背光调节）");
+  cap(830, 480, "<b>MIC</b> 麦克风");
+  cap(600, 300, "<b>LCD J1</b> 2.4\" TFTLCD 320×240 · ST7789V2");
+  cap(40, 160, "<b>USB-C</b> UART（CH340）");
+  cap(40, 520, "<b>USB-C</b> 原生 USB");
+  cap(238, 90, "<b>CPX</b> 排针 / IO_SET 跳线");
+  cap(864, 118, "<b>ATK-MWS3S</b> 天线区");
+  cap(717, 452, "<b>U2</b> 3.3V LDO / 电感电源区");
+
+  /* 板载按键：一颗一颗压在自己的按钮上 */
+  const BTN_Y = 550;
+  cap(665, BTN_Y, "<b>RESET</b>");
+  cap(720, BTN_Y, "<b>BOOT</b>");
+  cap(785, BTN_Y, "<b>KEY2</b>");
+  cap(855, BTN_Y, "<b>KEY1</b>");
+  cap(922, BTN_Y, "<b>KEY0</b>");
+  cap(856, 507, "<b>KEY3</b>");
+
+  /* 灯珠：LED（红，GPIO1）与 PWR（蓝，常亮） */
+  zone(612, 557, 23.2, 9.6, 'led', 'LED · GPIO1（红）', 'zoneLed');
+  zone(968, 511, 23.8, 9.6, 'pwr', 'PWR · 3V3（蓝，硬线常亮）', 'zonePwr');
+  $('zonePwr').classList.add('on');
+}
+
+function zone(x,y,w,h,kind,label,id){
+  const z = node('zone ' + kind, x, y);
+  z.style.width = pct(w,IW); z.style.height = pct(h,IH);
+  z.id = id; z.title = label;
+  const aura = document.createElement('i'); aura.className = 'aura'; z.appendChild(aura);
+  const core = document.createElement('i'); core.className = 'core'; z.appendChild(core);
+  return z;
+}
+
+/* ---------- 缩放 / 平移 ---------- */
+function applyStage(){
+  $('stage').style.transform =
+    `translate(${STAGE.x}px,${STAGE.y}px) scale(${STAGE.scale})`;
+}
+function fitStage(){
+  const vp = $('viewport');
+  const s = Math.min(vp.clientWidth/1569, vp.clientHeight/894) * 0.98;
+  zoomFit = s;
+  STAGE.scale = s;
+  STAGE.x = (vp.clientWidth - 1569*s)/2;
+  STAGE.y = (vp.clientHeight - 894*s)/2;
+  applyStage();
+}
+function zoomTo(next, cx, cy){
+  const vp = $('viewport');
+  cx = cx === undefined ? vp.clientWidth/2 : cx;
+  cy = cy === undefined ? vp.clientHeight/2 : cy;
+  next = Math.min(4.0, Math.max(0.2, next));
+  const k = next / STAGE.scale;
+  STAGE.x = cx - (cx - STAGE.x) * k;
+  STAGE.y = cy - (cy - STAGE.y) * k;
+  STAGE.scale = next; applyStage();
+}
+function zoomAt(factor, cx, cy){ zoomTo(STAGE.scale * factor, cx, cy); }
+
+function oneToOne(){
+  const vp = $('viewport');
+  STAGE.scale = 1;
+  STAGE.x = (vp.clientWidth - 1569) / 2;
+  STAGE.y = (vp.clientHeight - 894) / 2;
+  applyStage();
+}
+
+/* ---------- 状态同步到板面 ---------- */
+function syncBoard(st){
+  const led = (st.led || []).find(p => /GPIO/i.test(p.pin || ''));
+  const z = $('zoneLed');
+  if(z){
+    const lit = !!(led && !led.pwm && (led.active_low ? (led.level === 0) : (led.level === 1)));
+    z.classList.toggle('on', lit);
+    z.classList.toggle('pwm', !!(led && led.pwm));
+  }
+  const map = (st.key && st.key.state) || {};
+  const names = ['KEY0','KEY1','KEY2','KEY3','RESET','BOOT'];
+  document.querySelectorAll('.hot').forEach(h=>{
+    const n = +h.dataset.n;
+    const v = n === 5 ? undefined : map[names[n]];
+    h.classList.toggle('press', v === 1);
+  });
+}
+
+async function poll(){
+  const r = await api('/api/state');
+  if(!r.ok) return;
+  const s = r.state; stateData = s;
+  setBadge(s.status);
+  $('portLabel').textContent = s.port || '—';
+  $('mPort').textContent = s.port || '—';
+  $('mChip').textContent = s.chip_id || '—';
+  $('mFw').textContent = s.fw || '—';
+  $('mComp').textContent = (s.components && s.components.length) ? s.components.join(' / ') : '—';
+  $('fpsLabel').textContent = (s.fps || 0) + ' fps';
+  $('hintLine').textContent = s.hint || s.error || '';
+  $('progBar').style.width = Math.round((s.progress || 0) * 100) + '%';
+  $('progText').textContent = s.progress_text || '';
+  renderLed(s.led); renderKeys(s.key); syncBoard(s);
+  const hasB = !!(s.backup && s.backup.whole);
+  let hint = hasB
+    ? `已备份整片 ${Math.round((s.backup.size||0)/1048576*10)/10} MB · 可一键恢复`
+    : '尚无整片备份：注入组件会被拒绝，原样烧录不受影响';
+  if(s.purge_at){
+    const left = Math.max(0, Math.round((s.purge_at - Date.now()/1000) / 60));
+    hint += `\n板已拔出：${left} 分钟后自动删除该备份（插回即撤销）`;
+  }
+  $('backupHint').textContent = hint;
+  $('btnStop').classList.toggle('hidden', !s.busy);
+  if(s.busy) $('btnStop').textContent = s.busy === 'backup' ? '■ 停止备份'
+    : (s.busy === 'deploy' ? '■ 停止烧录' : '■ 停止');
+
+  if(!s.frame_seq || s.status === 'connected_no_fw' || s.status === 'no_device'){
+    if(s.status === 'connected_no_fw'){
+      $('overlayTitle').textContent = '缺少画面固件，请刷录固件';
+      $('overlayText').textContent = '板子在跑自己的程序，但没有上报组件。刷录会保留原工程并叠加只读组件。';
+      $('btnFlash').disabled = !(s.backup && s.backup.whole);
+    } else if(s.status === 'no_device' || s.status === 'idle'){
+      $('overlayTitle').textContent = '未连接开发板';
+      $('overlayText').textContent = '插上 S3 开发板后点「检测设备」';
+      $('btnFlash').disabled = true;
+    } else if(s.status === 'busy' || s.status === 'connecting'){
+      // busy/connecting 也必须有自己的文案：否则中途刷新页面会停在
+      // 默认的「未连接开发板」，与右侧已识别的端口/芯片 ID 自相矛盾。
+      $('overlayTitle').textContent = s.busy === 'backup' ? '正在备份原固件' : '正在处理';
+      $('overlayText').textContent = s.progress_text || '请稍候，过程中请勿拔线';
+    } else if(s.status === 'ready'){
+      // 已经握手成功但没有画面帧：绝大多数是板子没屏、或适配包没命中，
+      // 不能继续留着默认的「未连接开发板」文案误导。
+      $('overlayTitle').textContent = '已连接，暂无画面';
+      $('overlayText').textContent = '板子在跑，但没有画面帧：本板没有屏幕，或适配包未命中';
+    } else if(s.status === 'error'){
+      $('overlayTitle').textContent = '出错了';
+      $('overlayText').textContent = s.error || '请查看右侧日志';
+    }
+    if(s.status !== 'ready') $('overlay').classList.remove('hidden');
+  }
+  if(lastSeq !== s.frame_seq && s.frame_seq){ lastSeq = s.frame_seq; drawFrame(); }
+  if(s.logs) $('log').textContent = s.logs.join('\n');
+}
+
+async function stopTask(){
+  const busy = (stateData && stateData.busy) || '';
+  if(!busy) { toast('当前没有正在运行的任务'); return; }
+  const body = busy === 'backup'
+    ? '停止备份会**删除这次还没读完的备份镜像**，不会保留半份文件。'
+    : '停止烧录会把**开发板整片清空**（写到一半的固件不能留着，否则板子起不来）。';
+  const go = await askModal({title:'确定要停止吗',
+    text: body.replace(/\*\*/g,''),
+    warn: busy === 'backup' ? '停止后需要重新点「备份原固件」才能再烧录。'
+                            : '停止后芯片是空的；如果之前有备份，可以点「一键恢复原固件」刷回去。',
+    okText:'停止并执行收尾', cancelText:'继续当前任务', danger:true});
+  if(!go) return;
+  const r = await api('/api/stop');
+  if(!r.ok) toast('停止失败：' + (r.error || '未知错误'));
+  else toast(busy === 'backup' ? '正在停止备份…' : '正在停止并清空开发板…');
+}
+
+function openBackups(){
+  const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.openBackups;
+  if(h) { h.postMessage({action:'open'}); return; }
+  api('/api/open-backups', {});
+}
+
+async function scan(){
+  $('overlay').classList.remove('hidden');
+  $('overlayTitle').textContent = '正在检测设备…';
+  $('overlayText').textContent = '查找串口并握手，最多约 5 秒';
+  const r = await api('/api/ports');
+  if(!r.ok){ toast('无法枚举串口：' + (r.error || '未知错误')); return; }
+  const ports = (r.ports || []);
+  if(!ports.length){
+    toast('没有发现串口设备 · 数据线要支持传输 · 确认 CH340 驱动已装好 · 换一个 USB 口重试');
+    return;
+  }
+  const st = stateData || {};
+  const cur = st.port || '';
+  const usb = ports.find(p => /usbmodem/i.test(p.device || ''));
+  const keep = ports.find(p => p.device === cur);
+  const target = usb || keep || ports[0];
+  const c = await api('/api/connect', {port: target.device});
+  if(!c.ok) toast('连接失败：' + (c.error || '串口被其它程序占用'));
+  await poll();
+}
+
+/* ---------- 屏内提示（替代 alert：WKWebView 不弹系统 alert） ---------- */
+let toastTimer = null;
+function toast(msg){
+  const el = $('notice');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.classList.add('hidden'), 6000);
+}
+
+/* ---------- 自绘模态（替代 alert / confirm） ---------- */
+function askModal(opt){
+  return new Promise(resolve => {
+    const m = $('modal');
+    $('modalTitle').textContent = opt.title || '提示';
+    $('modalText').textContent = opt.text || '';
+    const w = $('modalWarn');
+    if(opt.warn){ w.textContent = opt.warn; w.classList.remove('hidden'); }
+    else { w.classList.add('hidden'); }
+    $('modalCancel').textContent = opt.cancelText || '取消';
+    $('modalOk').textContent = opt.okText || '确定';
+    $('modalOk').className = opt.danger ? 'danger' : 'primary';
+    m.classList.remove('hidden');
+    const done = v => { m.classList.add('hidden'); ok.onclick=null; cancel.onclick=null; overlay.onclick=null; resolve(v); };
+    const ok = $('modalOk'), cancel = $('modalCancel'), overlay = m;
+    ok.onclick = () => done(true);
+    cancel.onclick = () => done(false);
+    overlay.onclick = e => { if(e.target === overlay) done(false); };
+  });
+}
+
+/* 注入模式必须有整片备份：这是硬规则，提醒必须挡住操作，不是提示一句就算 */
+async function requireBackupThen(what){
+  const m = await askModal({
+    title: '还没有整片备份',
+    text: '注入组件会往你的工程里加文件、并覆盖芯片里的固件。没有整片备份，就失去了「一键恢复原固件」这条后路。',
+    warn: '步骤：先「备份原固件」（整片读一遍）→ 再编译烧录。备份期间请不要拔线、不要关窗口。',
+    okText: '立即备份，然后' + what, cancelText: '取消'
+  });
+  if(!m) return false;
+  const b = await api('/api/backup', {full: !!($('chkFull') && $('chkFull').checked)});
+  if(!b.ok){ toast('备份失败，已停止：' + (b.error || '未知错误')); return false; }
+  // /api/backup 是异步的：立刻往下走会在备份还没写完时就点烧录，后端闸门拒绝，
+  // 用户看到的就是「备份完成后还得再点一次编译并烧录」。这里必须等 busy 结束。
+  if(b.started){
+    toast('正在备份，完成后会自动继续' + what + '…');
+    while(true){
+      await new Promise(r=>setTimeout(r, 800));
+      const s = await api('/api/state');
+      const st = (s && s.state) || {};
+      stateData = st;
+      if(st.busy !== 'backup'){
+        if(st.error){ toast('备份失败，已停止：' + st.error); return false; }
+        break;
+      }
+    }
+  }
+  toast('整片备份完成，继续' + what);
+  return true;
+}
+
+/* 默认测试工程：用户指定用桌面上的 Local 文件夹，不再用旧 zip */
+window.addEventListener('load', () => {
+  const el = $('srcPath');
+  if(el && el.value.trim()) importProject(el.value.trim());
+});
+
+/* ---------- 工程选择（原生访达面板） ---------- */
+window.__pickedPath = function(picked){
+  if(!picked) return;
+  $('srcPath').value = picked;
+  importProject(picked);
+};
+
+function pickPath(){
+  const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.openPanel;
+  if(h){ h.postMessage({action:'pick'}); return; }
+  $('importInfo').textContent = '打包版里用访达选择；当前是浏览器模式，请直接粘贴绝对路径';
+}
+
+async function importProject(path){
+  path = (path || '').trim();
+  if(!path){ $('importInfo').textContent = '请先选择工程文件夹或 zip'; return; }
+  $('importInfo').textContent = '正在解析工程…';
+  const r = await api('/api/import', {path});
+  if(!r.ok){ $('importInfo').textContent = '导入失败：' + (r.error || '未知错误'); return; }
+  const pj = r.project || {}, sc = pj.screen_scan || {};
+  $('importInfo').textContent =
+    `${pj.kind || 'ESP-IDF 工程'} · target ${pj.target || '未知'} · 画面 ${sc.path || '未找到'}`;
+}
+
+/* ---------- 烧录方式 ---------- */
+function syncMode(){
+  const inject = $('rInject').checked;
+  $('compBox').style.display = inject ? '' : 'none';
+  $('btnBuild').textContent = inject ? '编译并烧录（注入组件）' : '编译并烧录（原样）';
+  $('modeHint').textContent = inject
+    ? '会往你的工程里加入 display / led / key 只读组件：板上出现画面、灯态、按键，本台即可同步显示。\n需要整片备份（否则无法一键恢复）。'
+    : '一个字节都不改你的工程，按它原本的样子编译烧录。\n会先整片清空芯片（覆盖），所以不需要备份，原固件也不会留下。';
+}
+$('rInject').onchange = syncMode;
+$('rRaw').onchange = syncMode;
+
+/* ---------- 按钮 ---------- */
+$('btnScan').onclick = scan;
+
+$('btnStop').onclick = stopTask;
+$('btnFinder').onclick = openBackups;
+$('btnPick').onclick = pickPath;
+
+$('btnBuild').onclick = async () => {
+  const st = stateData || {};
+  if(!st.port){ toast('还没有连接开发板：先点「检测设备」'); return; }
+  const src = $('srcPath').value.trim();
+  if(!src){ toast('先选一个要烧录的工程（模块④第一步）'); return; }
+  const inject = $('rInject').checked;
+  const comps = [];
+  if(inject){
+    if($('cDisplay').checked) comps.push('display');
+    if($('cLed').checked) comps.push('led');
+    if($('cKey').checked) comps.push('key');
+    if(!comps.length){ toast('注入模式下至少要勾选一个组件'); return; }
+  }
+  if(inject && !(st.backup && st.backup.whole)){
+    const go = await requireBackupThen('烧录');
+    if(!go){ poll(); return; }
+  }
+  const a = inject ? $('adapterSel').value : '';
+  const r = await api('/api/deploy', {source: src, components: comps,
+                                      adapters: a ? [a] : [], mode: inject ? 'inject' : 'raw'});
+  if(!r.ok){
+    // 后端闸门兜底：状态可能是上一轮拉到的旧值，这里再挡一次
+    if(r.code === 'NO_BACKUP'){
+      const go = await requireBackupThen('烧录');
+      if(go){
+        const r2 = await api('/api/deploy', {source: src, components: comps,
+                                             adapters: a ? [a] : [], mode: 'inject'});
+        if(!r2.ok) toast(r2.error || '无法开始烧录');
+      }
+    } else {
+      toast(r.error || '无法开始烧录');
+    }
+  }
+  poll();
+};
+
+$('btnBackup').onclick = async () => {
+  const st = stateData || {};
+  if(!st.port){ toast('还没有连接开发板：先点「检测设备」'); return; }
+  const r = await api('/api/backup', {full: !!($('chkFull') && $('chkFull').checked)});
+  if(!r.ok) toast('备份失败：' + (r.error || '未知错误'));
+  poll();
+};
+
+$('btnRollback').onclick = async () => {
+  const ok = await askModal({
+    title: '恢复接入时的原固件',
+    text: '把这块芯片接入时备份的整片镜像写回去，完成后本台会回到「缺少画面固件」，需要重新烧录才能投屏。',
+    warn: '只恢复当前这块芯片（按芯片 ID 隔离），不会动其它设备的备份。',
+    okText: '确认恢复', danger: true
+  });
+  if(!ok) return;
+  const r = await api('/api/rollback', {});
+  if(!r.ok) toast('恢复失败：' + (r.error || '未知错误'));
+  poll();
+};
+
+/* 板图上的「刷录固件」：没备份就先备份，再注入三件套 */
+$('btnFlash').onclick = async () => {
+  const st = stateData || {};
+  if(!st.port){ toast('还没有连接开发板：先点「检测设备」'); return; }
+  const src = $('srcPath').value.trim();
+  if(!src){ toast('先在模块④选择要叠加的工程，再点这里'); return; }
+  if(!(st.backup && st.backup.whole)){
+    const go = await requireBackupThen('刷录');
+    if(!go){ poll(); return; }
+  }
+  const r = await api('/api/deploy', {mode:'inject', components:['display','led','key'],
+                                      adapters: $('adapterSel').value ? [$('adapterSel').value] : [],
+                                      source: src});
+  if(!r.ok) toast(r.error || '无法开始烧录');
+  poll();
+};
+
+document.querySelectorAll('.key').forEach(el=>{
+  el.onclick = () => api('/api/key', {idx:+el.dataset.idx});
+});
+
+(async function init(){
+  buildBoard();
+  fitStage();
+  syncMode();
+  $('btnFit').addEventListener('click', fitStage);
+  $('btnOne').addEventListener('click', oneToOne);
+  window.addEventListener('resize', fitStage);
+
+  const vp = $('viewport');
+  const rect = () => vp.getBoundingClientRect();
+
+  /* 触控板捏合：WKWebView / Safari 的 GestureEvent */
+  let gBase = null, gx = 0, gy = 0;
+  vp.addEventListener('gesturestart', ev=>{
+    ev.preventDefault();
+    const r = rect(); gBase = STAGE.scale; gx = ev.clientX - r.left; gy = ev.clientY - r.top;
+  }, {passive:false});
+  vp.addEventListener('gesturechange', ev=>{
+    ev.preventDefault();
+    if(gBase == null) return;
+    zoomTo(gBase * ev.scale, gx, gy);
+  }, {passive:false});
+  vp.addEventListener('gestureend', ev=>{ ev.preventDefault(); gBase = null; }, {passive:false});
+
+  /* 滚轮：⌘/Ctrl（触控板捏合会被映射成 ctrl+wheel）= 缩放；
+     普通双指滑动 = 放大态下平移，适应态下不拦截、让页面正常滚动到下方模块 */
+  vp.addEventListener('wheel', ev=>{
+    if(ev.ctrlKey || ev.metaKey){
+      ev.preventDefault();
+      const r = rect();
+      zoomTo(STAGE.scale * Math.exp(-ev.deltaY * 0.0025), ev.clientX - r.left, ev.clientY - r.top);
+      return;
+    }
+    if(STAGE.scale > zoomFit * 1.05){
+      ev.preventDefault();
+      STAGE.x -= ev.deltaX;
+      STAGE.y -= ev.deltaY;
+      applyStage();
+    }
+  }, {passive:false});
+
+  /* 按住拖动平移 */
+  let drag = null;
+  vp.addEventListener('pointerdown', ev=>{
+    if(ev.button !== 0) return;
+    if(ev.target.closest('.hot') || ev.target.closest('#viewTools')) return;
+    drag = {x: ev.clientX, y: ev.clientY, sx: STAGE.x, sy: STAGE.y};
+    vp.classList.add('dragging');
+    vp.setPointerCapture(ev.pointerId);
+  });
+  vp.addEventListener('pointermove', ev=>{
+    if(!drag) return;
+    STAGE.x = drag.sx + (ev.clientX - drag.x);
+    STAGE.y = drag.sy + (ev.clientY - drag.y);
+    applyStage();
+  });
+  const endDrag = ()=>{ drag = null; vp.classList.remove('dragging'); };
+  ['pointerup','pointercancel','pointerleave'].forEach(t=>vp.addEventListener(t, endDrag));
+
+  /* 双击：适应 ↔ 1:1，锚点落在鼠标位置 */
+  vp.addEventListener('dblclick', ev=>{
+    ev.preventDefault();
+    const r = rect();
+    if(STAGE.scale > zoomFit * 1.1) fitStage();
+    else zoomTo(1, ev.clientX - r.left, ev.clientY - r.top);
+  });
+
+  /* ⌘0 适应 / ⌘1 原始像素 */
+  window.addEventListener('keydown', ev=>{
+    if(!(ev.metaKey || ev.ctrlKey)) return;
+    if(ev.key === '0'){ ev.preventDefault(); fitStage(); }
+    if(ev.key === '1'){ ev.preventDefault(); oneToOne(); }
+  });
+
+  /* 热区点击：既高亮右侧按键卡，也真的把按键命令发给开发板 */
+  document.querySelectorAll('.hot').forEach(h=>{
+    h.addEventListener('click', async ()=>{
+      const n = +h.dataset.n;
+      document.querySelectorAll('.key').forEach(k=>{
+        k.classList.toggle('active', n !== 5 && +k.dataset.idx === n);
+      });
+      if(n === 5){ toast('BOOT 是复位时的启动模式脚，需按住板载 BOOT 再复位，软件点按无效'); return; }
+      if(!(stateData && stateData.status === 'ready')){ toast('开发板未连接，先点「检测 / 自检」'); return; }
+      const r = await api('/api/key', {idx:n});
+      if(!r.ok) toast('按键命令发送失败：' + (r.error || '串口未就绪'));
+    });
+  });
+
+  const r = await api('/api/adapters');
+  if(r.ok && r.adapters && r.adapters.length){
+    $('adapterSel').innerHTML = r.adapters.map(a=>`<option value="${a.id}">${a.vendor} ${a.id}</option>`).join('');
+  }
+  poll(); setInterval(poll, 700);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+menu "Console Display"
+
+    config CONSOLE_DISPLAY_WIDTH
+        int "画面宽度（像素）"
+        default 320
+
+    config CONSOLE_DISPLAY_HEIGHT
+        int "画面高度（像素）"
+        default 240
+
+    config CONSOLE_DISPLAY_MAX_FPS
+        int "最大帧率"
+        default 20
+        help
+            受串口带宽限制：921600 下次全屏（75 块）约需 1.7 秒，
+            静态界面的实际帧率远高于该值，因为只发变化的块。
+
+endmenu
