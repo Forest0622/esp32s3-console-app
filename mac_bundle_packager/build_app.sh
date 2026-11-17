@@ -5,10 +5,34 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VENVPY="/Users/xiaoyi/.espressif/tools/python/v5.5.6/venv/bin/python"
+VENVPY="${CONSOLE_BUILD_PYTHON:-}"
+if [ -z "$VENVPY" ] && [ -n "${IDF_PYTHON_ENV_PATH:-}" ] && [ -x "$IDF_PYTHON_ENV_PATH/bin/python" ]; then
+  VENVPY="$IDF_PYTHON_ENV_PATH/bin/python"
+fi
+if [ -z "$VENVPY" ]; then
+  for candidate in \
+    "$HOME/.espressif/tools/python/v5.5.6/venv/bin/python" \
+    "$HOME/.espressif/python_env/idf5.5_py3.12_env/bin/python" \
+    "$HOME/.espressif/python_env/idf5.5_py3.9_env/bin/python"; do
+    if [ -x "$candidate" ]; then VENVPY="$candidate"; break; fi
+  done
+fi
+if [ -z "$VENVPY" ]; then
+  VENVPY="$(command -v python3 || true)"
+fi
+if [ ! -x "$VENVPY" ]; then
+  echo "未找到可用的 Python 构建环境；请先安装 ESP-IDF 工具链，或设置 CONSOLE_BUILD_PYTHON。"
+  exit 1
+fi
 APP_NAME="ESP32-S3 检修台"
 BUILD="$ROOT/mac_bundle_packager/build"
 BUNDLE="$BUILD/${APP_NAME}.app"
+VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "VERSION 文件格式错误：$VERSION（应为 x.y.z）"
+  exit 1
+fi
+echo "版本: $VERSION"
 
 echo "== 1/6 清理 =="
 rm -rf "$BUILD"
@@ -69,8 +93,8 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>${APP_NAME}</string>
   <key>CFBundleDisplayName</key><string>${APP_NAME}</string>
   <key>CFBundleIdentifier</key><string>com.xiaoyi.esp32s3console</string>
-  <key>CFBundleVersion</key><string>1.0.0</string>
-  <key>CFBundleShortVersionString</key><string>1.0.0</string>
+  <key>CFBundleVersion</key><string>${VERSION}</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>console_shell</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>

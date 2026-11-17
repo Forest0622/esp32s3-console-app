@@ -2,7 +2,7 @@
 
 > 版本：2026-11-17  
 > 代码根：`/Users/xiaoyi/个人/单片机/ESP-S3/Project/ESP32-S3-Console-App`  
-> App：`ESP32-S3 检修台`，bundle id `com.xiaoyi.esp32s3console`，版本 `1.0.0`  
+> App：`ESP32-S3 检修台`，bundle id `com.xiaoyi.esp32s3console`，版本 `1.1.0`  
 > 运行平台：macOS 12+，当前构建为 arm64  
 > 文档依据：本文按当前仓库代码重写。旧文档中的“两模式都必须备份”“仅 `-D` 注入”“采集 RESET”等说法已废弃，不再作为实现依据。
 
@@ -1039,6 +1039,13 @@ set(EXTRA_COMPONENT_DIRS "<work_copy>/components")
 | 6 | 写 `Info.plist`、`xattr -cr`、`codesign --force --deep --sign -` |
 | 7 | `hdiutil create -format UDZO` 生成桌面 DMG |
 
+版本来源：
+
+- 根目录 `VERSION` 保存唯一版本号，格式 `x.y.z`。
+- `build_app.sh` 启动时读取并校验；文件缺失或格式错误直接退出。
+- `CFBundleVersion` 与 `CFBundleShortVersionString` 都写入同一个版本号。
+- 每次改动必须递增版本：修 bug 用 patch，新增功能用 minor；提交并推送 `main` 后重新打包、发布 `vVERSION` Release。
+
 备份种子：
 
 - 只复制 `index.json` 与索引登记的、非零大小的镜像。
@@ -1051,7 +1058,7 @@ set(EXTRA_COMPONENT_DIRS "<work_copy>/components")
 |---|---|
 | `CFBundleName` / `CFBundleDisplayName` | `ESP32-S3 检修台` |
 | `CFBundleIdentifier` | `com.xiaoyi.esp32s3console` |
-| `CFBundleVersion` / `ShortVersion` | `1.0.0` |
+| `CFBundleVersion` / `ShortVersion` | `VERSION` 文件的值（当前 `1.1.0`） |
 | `CFBundleExecutable` | `console_shell` |
 | `CFBundleIconFile` | `AppIcon` |
 | `LSMinimumSystemVersion` | `12.0` |

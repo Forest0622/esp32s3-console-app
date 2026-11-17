@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import shutil
@@ -22,7 +23,9 @@ _CANDIDATE_IDF = (
     os.path.expanduser("~/esp/v5.5.6/esp-idf"),
 )
 _CANDIDATE_VENV = (
-    "/Users/xiaoyi/.espressif/tools/python/v5.5.6/venv/bin/python",
+    os.path.expanduser("~/.espressif/tools/python/v5.5.6/venv/bin/python"),
+    os.path.expanduser("~/.espressif/python_env/idf5.5_py3.12_env/bin/python"),
+    os.path.expanduser("~/.espressif/python_env/idf5.5_py3.9_env/bin/python"),
 )
 
 
@@ -73,6 +76,9 @@ def find_venv_python(idf_path: str) -> str:
     if env and Path(env, "bin", "python").is_file():
         return str(Path(env, "bin", "python"))
     for cand in _CANDIDATE_VENV:
+        if Path(cand).is_file():
+            return cand
+    for cand in sorted(glob.glob(os.path.expanduser("~/.espressif/python_env/idf5.5_py*/bin/python"))):
         if Path(cand).is_file():
             return cand
     return ""

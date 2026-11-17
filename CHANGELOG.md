@@ -1,10 +1,21 @@
 # 更新日志
 
-## 未发布
+## v1.1.0 — 2026-11-17
+
+### 变更
 
 - 开发板拔出满 1 小时，除该芯片备份外，同时清理 `data/workspace` 构建副本、`data/projects_imported` 导入工程、旧版外层 `projects_imported` 和遗留分块临时文件。
 - 插回开发板立即撤销清理；有任意串口设备在线时不执行。
 - 清理只动 App 数据目录，不动用户原始工程、正式备份镜像、`index.json` 和 `port.txt`。
+- 新增 `VERSION` 文件；`build_app.sh` 从该文件写入 `CFBundleVersion` 与 `CFBundleShortVersionString`。
+- 每次改动递增版本并同步 GitHub；修 bug 用 patch，新增功能用 minor。
+
+### 安装包
+
+- `ESP32-S3 检修台.dmg`，9,694,864 字节
+- SHA-256 `3dc2d23fd08531c4a804719468184dc2303718ec50d480ec10559366e3d657aa`
+- `.app` 16 MB，ad-hoc 签名，arm64，未公证
+- `hdiutil verify` 通过
 
 ## v1.0.0 — 2026-11-17
 

@@ -184,3 +184,19 @@
 | 后端测试 | 7 组全部通过（新增 `test_cleanup`） |
 
 当前 Git 源码已包含该规则；已发布的 v1.0.0 DMG 未重新打包，仍不包含此规则。下次打包后生效。
+
+## 第八轮验证记录（2026-11-17，v1.1.0 版本与打包）
+
+| 项目 | 结果 |
+|---|---|
+| `VERSION` | `1.1.0` |
+| `CFBundleVersion` | `1.1.0` |
+| `CFBundleShortVersionString` | `1.1.0` |
+| 后端测试 | 7 组全部通过 |
+| IDF Python | `~/.espressif/python_env/idf5.5_py3.9_env/bin/python`；`build_env_checker` 改为按 `IDF_PYTHON_ENV_PATH` 和 `~/.espressif/python_env/idf5.5_py*` 探测 |
+| `.app` | 16 MB，arm64，ad-hoc 签名 |
+| DMG | 9,694,864 字节 |
+| SHA-256 | `3dc2d23fd08531c4a804719468184dc2303718ec50d480ec10559366e3d657aa` |
+| `hdiutil verify` | checksum VALID |
+
+本轮同时把版本规则写死到流程：`VERSION` 是唯一版本源；每次改动递增版本、跑测试、提交并推送 `main`、重新打包、发布 `vVERSION` Release。

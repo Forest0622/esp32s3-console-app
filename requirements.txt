@@ -1,10 +1,10 @@
 # 运行依赖
 #
-# 本项目必须用 ESP-IDF 自带的 Python 运行（里面已有 pyserial 与 esptool）：
-#   /Users/xiaoyi/.espressif/tools/python/v5.5.6/venv/bin/python
+# 本项目使用 ESP-IDF 自带的 Python 环境，路径以 IDF_PYTHON_ENV_PATH 为准：
+#   source "$IDF_PATH/export.sh"
+#   "$IDF_PYTHON_ENV_PATH/bin/python" -m pip install -r requirements.txt
 #
-# 若换机器，先激活 IDF 环境，再在本文件所在目录执行：
-#   pip install -r requirements.txt
+# 打包脚本会自动探测 ~/.espressif 下的 IDF Python；也可用 CONSOLE_BUILD_PYTHON 指定。
 
 pyserial==3.5
 esptool==4.12.0

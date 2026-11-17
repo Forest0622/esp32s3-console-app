@@ -138,6 +138,13 @@ cd "/Users/xiaoyi/个人/单片机/ESP-S3/Project/ESP32-S3-Console-App"
 
 脚本六步：清理 → PyInstaller（`--collect-all esptool`）→ 组装 `.app` → 复制前端 / 组件 / 图标 / 备份种子 → Swift 编译原生壳 → 写 `Info.plist`、ad-hoc 签名 → `hdiutil` 生成 DMG。
 
+### 版本与发布规则
+
+- 根目录 `VERSION` 是版本唯一来源，格式 `x.y.z`；`build_app.sh` 读取失败或格式不对时直接退出。
+- 每次改动必须递增版本：修 bug 用 patch，新增功能用 minor。
+- 每次改动完成后依次执行：更新 `VERSION` → 跑 `tests/test_backend.py` → 提交并 `git push origin main` → `./mac_bundle_packager/build_app.sh` → 发布 GitHub Release `vVERSION`，附带 DMG 与 macOS 截图。
+- 当前只有 macOS 构建，Release 中没有 Windows 截图时如实标注，不用占位图。
+
 打包前必须退出正在运行的 `ESP32-S3 检修台.app`；脚本会 `rm -rf build`。
 
 产物：
