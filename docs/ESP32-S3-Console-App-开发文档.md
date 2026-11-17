@@ -229,7 +229,7 @@ ConsoleApp._last_frame ──/api/frame.bmp──> 前端 Image → canvas
 | `led` | `renderLed()`：PWM 显示 `PWM n%`；静态按 `active_low` 判断亮/灭 |
 | `key` | `renderKeys()`：`-1` 或缺失显示“未配置”，否则“按下/松开” |
 | `backup.whole` | `backupHint` 显示“已备份整片 N MB · 可一键恢复” |
-| `purge_at` | 显示“板已拔出：N 分钟后自动删除该备份（插回即撤销）” |
+| `purge_at` / `cleanup_at` | 显示“板已拔出：N 分钟后自动清理备份、缓存与导入工程（插回即撤销）” |
 | `progress` / `progress_text` | 进度条与阶段文字 |
 | `logs` | 最近 40 行 |
 | `frame_seq` | 变化时拉一次 `/api/frame.bmp` |
