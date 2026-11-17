@@ -168,3 +168,19 @@
 - RESET / BOOT 采集：固件只采 KEY0–KEY3。
 - 正点原子适配包：`verified=false`，未实测。
 - Windows 版本与双系统截图：不存在。
+
+## 第七轮验证记录（2026-11-17，拔板清理策略）
+
+新增规则：开发板拔出满 1 小时后，除该芯片备份外，同时清理构建副本、导入工程和旧版外层 `projects_imported`。
+
+| 项目 | 结果 |
+|---|---|
+| 本机清理前 | `ESP32-S3-Console-App` 总占用约 4.3 GB，其中 `data/workspace` 4.2 GB |
+| 清理调用 | `app_data_cleanup.purge_caches(home)` |
+| 清理结果 | 3 个构建目录、21 个导入工程、13 个旧版目录；释放 4,507,029,123 字节 |
+| 清理后 | 根目录 20 MB；`data/workspace` 与 `data/projects_imported` 为空；外层旧目录为空 |
+| 备份保留 | `data/backups/` 的 4 个镜像、`index.json`、`pending_purge.json` 未动 |
+| 计时测试 | 插着板不清理；拔出 59 秒不清理；拔出 3601 秒清理；同一轮不重复清理 |
+| 后端测试 | 7 组全部通过（新增 `test_cleanup`） |
+
+当前 Git 源码已包含该规则；已发布的 v1.0.0 DMG 未重新打包，仍不包含此规则。下次打包后生效。

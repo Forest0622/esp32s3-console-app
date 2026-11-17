@@ -42,7 +42,7 @@
 | 后端 | `backend/*.py` | 串口、协议解析、导入、编译、烧录、备份、HTTP |
 | 固件组件 | `esp32_components/*` | 注入到用户 ESP-IDF 工程的只读采集组件 |
 | 打包资源 | `mac_bundle_packager/assets/AppIcon.icns` | App 图标 |
-| 测试 | `tests/test_backend.py`、`tests/fixture_project` | 后端 6 组自测 |
+| 测试 | `tests/test_backend.py`、`tests/fixture_project` | 后端 7 组自测 |
 
 后端由 PyInstaller 打成 `console_app`，窗口壳再以子进程启动它。窗口壳只负责窗口、WebView、原生文件面板与退出清理；业务全部在后端。
 
@@ -269,6 +269,7 @@ ConsoleApp._last_frame ──/api/frame.bmp──> 前端 Image → canvas
 | 模块 | 职责 |
 |---|---|
 | `app.py` | 状态、连接、备份、回滚、停止、部署、命令行入口、`--esptool-cli` 隐藏入口 |
+| `app_data_cleanup.py` | 拔板计时、清理工作区副本、导入工程、旧版目录与分块临时文件 |
 | `config.py` | 全局路径与少量旧常量；实际备份/烧录参数以各业务模块为准 |
 | `log_setup.py` | 日志初始化 |
 | `state_store.py` | 状态持久化辅助 |
@@ -343,7 +344,8 @@ ConsoleApp._last_frame ──/api/frame.bmp──> 前端 Image → canvas
 | `backup` | object/null | 索引条目 |
 | `has_backup` | bool | 当前芯片是否有 `whole=true` 的备份 |
 | `last_flash` | object/null | 最近一次烧录的时间、工作区、模式、组件、适配包 |
-| `purge_at` | number/null | 拔板自动清理到期时间戳 |
+| `purge_at` | number/null | 拔板自动清理备份到期时间戳 |
+| `cleanup_at` | number/null | 拔板满 1 小时清理缓存与旧工程的到期时间戳 |
 | `logs` | string[] | 最近 40 行 |
 
 ---
@@ -971,7 +973,7 @@ set(EXTRA_COMPONENT_DIRS "<work_copy>/components")
 
 ### 14.7 拔板清理
 
-`backups/pending_purge.json`：
+`backups/pending_purge.json` 保存按芯片的备份清理登记：
 
 ```json
 {
@@ -983,11 +985,30 @@ set(EXTRA_COMPONENT_DIRS "<work_copy>/components")
 }
 ```
 
-- 插入时 `cancel_purge(chip)`，撤销登记。
+`data/cleanup_state.json` 保存全局插拔计时：
+
+```json
+{
+  "last_present_at": 1763,
+  "cleanup_due_at": 1763,
+  "last_cleanup_at": null,
+  "last_result": null
+}
+```
+
+- 插入时 `cancel_purge(chip)`，撤销该芯片的备份清理登记；`cleanup_state.json` 的 `last_present_at` 在下一轮刷新，撤销缓存清理。
 - `check_plug_state()` 每 30 秒执行：只要系统里还有任何 `usbmodem`、`usbserial`、`wchusbserial` 设备，就认为板子还插着，不登记、不删除。
-- 没有任何串口设备且当前芯片有备份 → `schedule_purge`，`due_at=now+3600`。
-- `purge_expired()` 到期后只删该芯片的镜像 + 索引条目，不动工作区、不动别的芯片。
-- `purge_expired()` 内部还有一道总闸门：只要还有任何串口设备，直接返回空，不删除。
+- 没有任何串口设备且当前芯片已知 → `schedule_purge`，`due_at=now+3600`，同时写 `purge_at`。
+- `purge_expired()` 到期后删除该芯片的镜像与索引条目。
+- `app_data_cleanup.maybe_cleanup()` 到期后删除：
+  - `data/workspace/` 下的全部构建副本；
+  - `data/projects_imported/` 下的全部解压工程；
+  - 旧版留在 `Application Support/ESP32-S3-Console-App/projects_imported/` 下的目录；
+  - `data/backups/.chunk_*.tmp*` 遗留分块。
+- 清理不动用户原始工程，不动 `backups/` 里的正式镜像与 `index.json`，不动 `port.txt`。
+- `maybe_cleanup()` 在同一轮拔板事件里只执行一次，避免每 30 秒重复扫描；重新插回后从新的 `last_present_at` 重新计时。
+- 正在备份、编译或烧录时跳过清理，等 `busy` 清空后再判断，避免删掉正在使用的工作区。
+- `purge_expired()` 与 `maybe_cleanup()` 都受同一个总闸门约束：只要还有任何串口设备，直接返回，不删除。
 
 ### 14.8 备份速度
 
@@ -1067,7 +1088,7 @@ set(EXTRA_COMPONENT_DIRS "<work_copy>/components")
 
 ## 16. 测试与验收
 
-### 16.1 后端 6 组
+### 16.1 后端 7 组
 
 `tests/test_backend.py`：
 
@@ -1079,6 +1100,7 @@ set(EXTRA_COMPONENT_DIRS "<work_copy>/components")
 | `test_injector` | 复制组件、副本 CMake 写入、原工程不动 |
 | `test_importer` | zip slip、工程根、Arduino 拒绝 |
 | `test_env` | IDF 预检 |
+| `test_cleanup` | 拔板 1 小时计时、构建副本/导入工程/旧版目录清理、备份保留 |
 
 运行：
 
@@ -1098,7 +1120,7 @@ set(EXTRA_COMPONENT_DIRS "<work_copy>/components")
 | 组件 | `['led','key','display']` |
 | 备份 | `dcb4d916b448_20261116_1459_1600KB.bin`，`whole=true`，`size=16777216`，`data_size=1638400`，`baud=921600` |
 | 画面 | `fps≈1.5` |
-| 后端测试 | 6 组全过 |
+| 后端测试 | 7 组全过 |
 
 ### 16.3 打包验收（2026-11-17）
 

@@ -18,7 +18,7 @@ macOS 桌面应用。连接 ESP32-S3 开发板，读取芯片信息与实时画�
 | 原样烧录 | 不注入组件，先整片擦除，再编译、烧录、二次读芯片 ID 校验；不要求备份 |
 | 备份 | 快速备份只读到最后分区末尾；完整备份读整片；按芯片 MAC 隔离索引 |
 | 回滚 | 稀疏备份先整片擦除再写镜像；空片备份只擦除；禁止跨芯片回滚 |
-| 清理 | 开发板拔出满 1 小时后删除该芯片备份；重新插回撤销；有任意串口设备在线时不执行删除 |
+| 清理 | 开发板拔出满 1 小时后，删除该芯片备份、构建副本、导入工程和旧版 `projects_imported`；插回撤销；有任意串口设备在线时不执行 |
 | 打包 | PyInstaller + Swift NSWindow/WKWebView；生成 `.app` 与 DMG；含 `esptool` 与备份种子 |
 
 ## 未实现与限制
@@ -48,9 +48,11 @@ macOS 桌面应用。连接 ESP32-S3 开发板，读取芯片信息与实时画�
 ```
 ~/Library/Application Support/ESP32-S3-Console-App/data/
 ├── backups/                 # 按芯片 MAC 的整片镜像与 index.json
-├── workspace/               # 每次编译用的工作区副本
-└── projects_imported/       # zip / tar 解压目录
+├── workspace/               # 每次编译用的工作区副本；拔板满 1 小时清空
+└── projects_imported/       # zip / tar 解压目录；拔板满 1 小时清空
 ```
+
+旧版遗留在 `~/Library/Application Support/ESP32-S3-Console-App/projects_imported/` 的目录，也会在开发板拔出满 1 小时后清理。
 
 ### 从源码运行
 
@@ -68,7 +70,7 @@ cd "/Users/xiaoyi/个人/单片机/ESP-S3/Project/ESP32-S3-Console-App"
 /Users/xiaoyi/.espressif/tools/python/v5.5.6/venv/bin/python tests/test_backend.py
 ```
 
-当前 6 组：CRC、混合流解析、烧录清单、组件注入、工程导入、IDF 预检。脚本不依赖 pytest，直接运行即可。
+当前 7 组：CRC、混合流解析、烧录清单、组件注入、工程导入、IDF 预检、拔板清理。脚本不依赖 pytest，直接运行即可。
 
 ## 烧录流程
 

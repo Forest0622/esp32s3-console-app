@@ -809,7 +809,8 @@ def purge_deadline(chip_id: str) -> float | None:
 def purge_expired(now: float | None = None) -> list[str]:
     """删掉所有已超期设备的备份文件与索引条目，返回被删的芯片 ID 列表。
 
-    只删「这份整片镜像 + 索引里这一条」，不动别的设备，也不动 workspaces：
+    这里只删「这份整片镜像 + 索引里这一条」。构建副本、导入工程和旧目录
+    由 app_data_cleanup 在同一拔板到期事件里清理；两边都受同一个总闸门约束。
     备份的意义是回滚，拔出 1 小时还没插回来说明这块板不在现场，
     留着 16 MB 只是占地方（用户口径）。
     """

@@ -615,9 +615,10 @@ async function poll(){
   let hint = hasB
     ? `已备份整片 ${Math.round((s.backup.size||0)/1048576*10)/10} MB · 可一键恢复`
     : '无备份';
-  if(s.purge_at){
-    const left = Math.max(0, Math.round((s.purge_at - Date.now()/1000) / 60));
-    hint += `\n板已拔出：${left} 分钟后自动删除该备份（插回即撤销）`;
+  const purgeAt = s.purge_at || s.cleanup_at;
+  if(purgeAt){
+    const left = Math.max(0, Math.round((purgeAt - Date.now()/1000) / 60));
+    hint += `\n板已拔出：${left} 分钟后自动清理备份、缓存与导入工程（插回即撤销）`;
   }
   $('backupHint').textContent = hint;
   $('btnStop').classList.toggle('hidden', !s.busy);

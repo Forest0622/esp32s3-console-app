@@ -1,5 +1,11 @@
 # 更新日志
 
+## 未发布
+
+- 开发板拔出满 1 小时，除该芯片备份外，同时清理 `data/workspace` 构建副本、`data/projects_imported` 导入工程、旧版外层 `projects_imported` 和遗留分块临时文件。
+- 插回开发板立即撤销清理；有任意串口设备在线时不执行。
+- 清理只动 App 数据目录，不动用户原始工程、正式备份镜像、`index.json` 和 `port.txt`。
+
 ## v1.0.0 — 2026-11-17
 
 macOS arm64 首个安装包。

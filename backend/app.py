@@ -17,6 +17,7 @@ import cancel_token
 from pathlib import Path
 
 import build_env_checker
+import app_data_cleanup
 import firmware_backup_manager as backup_mod
 import flash_controller
 import idf_build_scheduler
@@ -59,6 +60,7 @@ class ConsoleApp:
             "adapters": [],
             "last_flash": None,
             "purge_at": None,          # 拔板满 1 小时自动删备份的时间点（UI 用来提示）
+            "cleanup_at": None,        # 拔板满 1 小时清理缓存/旧工程的时间点
         }
         self._frame_times: list[float] = []
         self._last_frame: bytes | None = None
@@ -294,16 +296,16 @@ class ConsoleApp:
         # 那不是用户拔线。真正的拔板由 _purge_loop 按「端口还在不在」判断。
 
     def _mark_unplugged(self) -> None:
-        """开发板拔出：登记 1 小时后自动删除该芯片的备份（用户口径）。"""
+        """开发板拔出：登记 1 小时后自动清理备份、缓存与旧工程。"""
         chip = self.state.get("chip_id", "")
-        if not chip or not backup_mod.has_backup(chip):
+        if not chip:
             self.set(purge_at=None)
             return
         due = backup_mod.purge_deadline(chip) or (time.time() + backup_mod.PURGE_GRACE)
         backup_mod.schedule_purge(chip, at=due - backup_mod.PURGE_GRACE)
         self.set(purge_at=due)
         self.log(f"设备已拔出：{time.strftime('%H:%M', time.localtime(due))} "
-                 f"自动删除 {chip} 的备份（插回即撤销）")
+                 f"自动清理该设备的备份、缓存与导入工程（插回即撤销）")
 
     def check_plug_state(self) -> None:
         """按「这个端口还在不在」判定插拔，避免把内部停止链路当成拔板。
@@ -321,7 +323,7 @@ class ConsoleApp:
         if present:
             if self.state.get("purge_at") or backup_mod.purge_deadline(chip):
                 backup_mod.cancel_purge(chip)
-                self.set(purge_at=None)
+                self.set(purge_at=None, cleanup_at=None)
                 self.log(f"{chip} 已插回，撤销自动清理")
         elif backup_mod.has_backup(chip):
             self._mark_unplugged()
@@ -607,10 +609,10 @@ def _watch_parent() -> None:
 
 
 def _purge_loop(app: "ConsoleApp") -> None:
-    """每 30 秒扫一次：拔出满 1 小时的设备，自动删掉它的整片备份。
+    """每 30 秒扫一次：拔出满 1 小时后清理备份、缓存与旧工程。
 
-    只做「到期才删」，不会因为 App 重启就丢登记——登记写在
-    backups/pending_purge.json，下次启动先 purge_expired() 一次。
+    备份登记写在 backups/pending_purge.json，App 重启后仍会继续；
+    缓存清理的插拔计时写在 data/cleanup_state.json，二者相互独立。
     """
     while True:
         time.sleep(30)
@@ -618,16 +620,52 @@ def _purge_loop(app: "ConsoleApp") -> None:
             app.check_plug_state()
         except Exception as exc:  # noqa: BLE001
             app.log(f"插拔检测失败：{type(exc).__name__}: {exc}")
+        present = True
+        cleaned = None
+        try:
+            present = bool(serial_utils.list_candidate_ports())
+        except Exception as exc:  # noqa: BLE001
+            app.log(f"串口存在性检查失败：{type(exc).__name__}: {exc}")
+        # 正在备份/编译/烧录时不动数据目录，等长任务结束后再判断。
+        if app.state.get("busy"):
+            continue
+        try:
+            cleaned = app_data_cleanup.maybe_cleanup(present)
+            if cleaned:
+                app.set(cleanup_at=None,
+                        hint="已按规则清理构建缓存与旧导入工程")
+                app.log(
+                    "开发板已拔出满 1 小时：清理 "
+                    f"{cleaned['workspace']} 个构建副本、"
+                    f"{cleaned['projects']} 个导入工程、"
+                    f"{cleaned['legacy_projects']} 个旧目录，"
+                    f"释放 {cleaned['bytes'] / 1048576:.1f} MB")
+        except Exception as exc:  # noqa: BLE001
+            app.log(f"自动清理缓存失败：{type(exc).__name__}: {exc}")
         try:
             removed = backup_mod.purge_expired()
         except Exception as exc:  # noqa: BLE001
             app.log(f"自动清理备份失败：{type(exc).__name__}: {exc}")
             continue
         for chip in removed:
-            app.log(f"开发板已拔出满 1 小时：自动删除 {chip} 的备份")
+            app.log(f"开发板已拔出满 1 小时：自动清理 {chip} 的备份")
             if app.state.get("chip_id", "").lower() == chip.lower():
                 app.set(backup=None, purge_at=None,
                         hint="该设备的备份已按规则自动清理，重新烧录需先重新备份")
+        if removed and not cleaned:
+            cleaned = app_data_cleanup.purge_caches()
+            if cleaned:
+                app.log(
+                    "开发板已拔出满 1 小时：清理 "
+                    f"{cleaned['workspace']} 个构建副本、"
+                    f"{cleaned['projects']} 个导入工程、"
+                    f"{cleaned['legacy_projects']} 个旧目录，"
+                    f"释放 {cleaned['bytes'] / 1048576:.1f} MB")
+        if not present:
+            due = app_data_cleanup.deadline()
+            app.set(cleanup_at=due)
+        else:
+            app.set(cleanup_at=None)
 
 
 def main() -> int:
@@ -654,9 +692,33 @@ def main() -> int:
     app = ConsoleApp()
     _watch_parent()
 
-    # 启动先清一次过期备份（App 关着的时候到期的也要删掉），再起常驻清扫线程
+    # 启动先处理拔板计时：板子不在且已满 1 小时，清缓存与旧工程；
+    # 再清一次过期备份（App 关着的时候到期的也要删掉）。
+    present = True
+    cleaned = None
     try:
-        for chip in backup_mod.purge_expired():
+        present = bool(serial_utils.list_candidate_ports())
+        cleaned = app_data_cleanup.maybe_cleanup(present)
+        if cleaned:
+            app.log(
+                "启动清理：开发板拔出已满 1 小时，清理 "
+                f"{cleaned['workspace']} 个构建副本、"
+                f"{cleaned['projects']} 个导入工程，"
+                f"释放 {cleaned['bytes'] / 1048576:.1f} MB")
+        app.set(cleanup_at=None if present else app_data_cleanup.deadline())
+    except Exception as exc:  # noqa: BLE001
+        app.log(f"启动清理缓存失败：{type(exc).__name__}: {exc}")
+    try:
+        removed = backup_mod.purge_expired()
+        if removed and not cleaned:
+            cleaned = app_data_cleanup.purge_caches()
+            if cleaned:
+                app.log(
+                    "启动清理：开发板拔出已满 1 小时，清理 "
+                    f"{cleaned['workspace']} 个构建副本、"
+                    f"{cleaned['projects']} 个导入工程，"
+                    f"释放 {cleaned['bytes'] / 1048576:.1f} MB")
+        for chip in removed:
             app.log(f"启动清理：开发板拔出已满 1 小时，删除 {chip} 的备份")
     except Exception:  # noqa: BLE001
         pass

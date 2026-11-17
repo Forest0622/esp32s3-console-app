@@ -11,11 +11,13 @@ from __future__ import annotations
 import json
 import struct
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 
+import app_data_cleanup            # noqa: E402
 import flash_controller              # noqa: E402
 import project_importer              # noqa: E402
 import serial_data_parser            # noqa: E402
@@ -132,6 +134,54 @@ def test_importer() -> None:
     check("全部适配包可读出（含 verified:false）", len(adapters_all) >= 1, str(adapters_all))
 
 
+def test_cleanup() -> None:
+    print("[7] 拔板清理缓存与旧工程")
+    with tempfile.TemporaryDirectory() as td:
+        base = Path(td) / "ESP32-S3-Console-App"
+        home = base / "data"
+        workspace = home / "workspace" / "chip1"
+        imported = home / "projects_imported" / "old1"
+        legacy = base / "projects_imported" / "legacy1"
+        backup = home / "backups"
+        for d in (workspace, imported, legacy, backup):
+            d.mkdir(parents=True, exist_ok=True)
+        (workspace / "build.bin").write_bytes(b"x" * 4096)
+        (imported / "main.c").write_text("// old project", encoding="utf-8")
+        (legacy / "old.txt").write_text("legacy", encoding="utf-8")
+        (backup / "keep.bin").write_bytes(b"backup")
+        (backup / "index.json").write_text('{"boards":{}}', encoding="utf-8")
+        (backup / ".chunk_1.tmp").write_bytes(b"temp")
+
+        got = app_data_cleanup.purge_caches(home)
+        check("清掉构建副本", got["workspace"] == 1, str(got))
+        check("清掉导入工程", got["projects"] == 1, str(got))
+        check("清掉旧版目录", got["legacy_projects"] == 1, str(got))
+        check("清掉分块临时文件", got["temp_files"] == 1, str(got))
+        check("释放字节数大于 0", got["bytes"] > 0, str(got))
+        check("workspace 已空", not any((home / "workspace").iterdir()))
+        check("导入工程已空", not any((home / "projects_imported").iterdir()))
+        check("旧版目录已空", not any((base / "projects_imported").iterdir()))
+        check("正式备份镜像保留", (backup / "keep.bin").is_file())
+        check("备份索引保留", (backup / "index.json").is_file())
+
+        # 重新生成缓存，验证 1 小时计时：插着不删，拔出未满 1 小时不删，满 1 小时删。
+        (home / "workspace" / "chip2").mkdir(parents=True)
+        (home / "workspace" / "chip2" / "build.bin").write_bytes(b"y" * 1024)
+        (home / "projects_imported" / "new1").mkdir(parents=True)
+        check("插着板不清理",
+              app_data_cleanup.maybe_cleanup(True, home, now=1000) is None)
+        check("拔出未满 1 小时不清理",
+              app_data_cleanup.maybe_cleanup(False, home, now=1000 + 59) is None)
+        check("拔出满 1 小时清理",
+              isinstance(app_data_cleanup.maybe_cleanup(False, home, now=1000 + 3601), dict))
+        check("构建副本已清空", not any((home / "workspace").iterdir()))
+        check("导入工程已清空", not any((home / "projects_imported").iterdir()))
+        check("同一轮不会重复清理",
+              app_data_cleanup.maybe_cleanup(False, home, now=1000 + 7201) is None)
+        check("清理截止时间已结束",
+              app_data_cleanup.deadline(home) is None)
+
+
 def test_env() -> None:
     print("[6] 编译环境检查")
     idf = build_env_checker.find_idf()
@@ -144,7 +194,7 @@ def test_env() -> None:
 
 def main() -> int:
     for fn in (test_crc, test_parser, test_flasher_args, test_injector,
-               test_importer, test_env):
+               test_importer, test_env, test_cleanup):
         fn()
     print()
     if FAILS:
