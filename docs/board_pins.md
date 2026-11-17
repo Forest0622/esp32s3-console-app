@@ -7,14 +7,60 @@
 
 | 项目 | 实际连接 | 组件行为 |
 |---|---|---|
-| 板载红灯 | GPIO1，低电平点亮 | `CONFIG_LED_READ_PIN=1`、`CONFIG_LED_READ_ACTIVE_LOW=1`，只读 |
+| 板载红灯 | GPIO1，**电平极性两份文档冲突**：本文件记低电平点亮，`board.h` 记高电平点亮 | `CONFIG_LED_READ_PIN=1`，`CONFIG_LED_READ_ACTIVE_LOW` 按实测定；未实测前不得写死 |
 | KEY0 | XL9555 输入端口 1 的 P17 | 已实现只读采集 |
 | KEY1 | XL9555 输入端口 1 的 P16 | 已实现只读采集 |
 | KEY2 | XL9555 输入端口 1 的 P15 | 已实现只读采集 |
 | KEY3 | XL9555 输入端口 1 的 P14 | 已实现只读采集 |
 | RESET | EN 复位脚，不是普通 GPIO | `CONFIG_KEY_READ_RESET=-1`，不采集 |
 | BOOT | GPIO0，拉低进下载模式 | 没有采集项，不采集 |
-| 屏幕 | ST7789 类 SPI 屏；复位/背光挂 XL9555 | 走 `esp_lcd` 时可在 `esp_lcd_panel_draw_bitmap` 截帧；工程暴露 `ui_framebuffer()` 时可直接整帧读 |
+| 屏幕 | ST7789V2，320×240，4 线 SPI；复位/背光挂 XL9555 | 走 `esp_lcd` 时可在 `esp_lcd_panel_draw_bitmap` 截帧；工程暴露 `ui_framebuffer()` 时可直接整帧读 |
+
+### 屏幕 SPI 引脚
+
+| 信号 | GPIO | 备注 |
+|---|---|---|
+| LCD_MOSI | 11 | SPI2 MOSI |
+| LCD_SCLK | 12 | SPI2 SCLK |
+| LCD_MISO | 13 | 屏不接 MISO，仅占用总线 |
+| LCD_CS | 21 | 片选 |
+| LCD_DC | 40 | 数据/命令，官方表标注 `LCD_DC` |
+| 分辨率 | — | 320×240（`board.h` 的 `LCD_W` / `LCD_H`） |
+| 复位 | XL9555 P12 | 低电平复位 |
+| 背光 | XL9555 P13 | 高电平点亮 |
+
+### 音频（ES8388）
+
+数据来源：《DNESP32S3 硬件参考手册》表 1.2.2.1 IO 资源分配总表。与该板 V1.3 的 `board.h` 交叉核对，SPI 与 I2C 共 8 项逐项一致，据此采信音频 5 项。
+
+| 信号 | GPIO | 官方表标注 | 方向 |
+|---|---|---|---|
+| MCLK | 3 | `I2S_MCLK` | ESP32 → ES8388 |
+| BCLK | 46 | `I2S_SCK` | ESP32 → ES8388 |
+| LRCK / WS | 9 | `I2S_LRCK` | ESP32 → ES8388 |
+| 数据出 | 10 | `I2S_SDIN` | ESP32 → ES8388 |
+| 数据入 | 14 | `I2S_SDOUT` | ES8388 → ESP32 |
+
+**方向按 Codec 侧命名，不按 ESP32 侧。** `I2S_SDIN` 是 ES8388 的输入脚，对 ESP32 是输出；`I2S_SDOUT` 是 ES8388 的输出脚，对 ESP32 是输入。写反不报错，但无声且录不到音。
+
+| 项目 | 值 | 状态 |
+|---|---|---|
+| I2C 地址 | 0x10 | 待核实：上电扫 0x08–0x77，应同时命中 0x10 与 0x20 |
+| 控制总线 | I2C0，与 XL9555 共用 SDA 41 / SCL 42 | 已核对 |
+| 麦克风 | 板载单 MIC，接 LIP/LIN 与 RIP/RIN，左右声道同源 | 已核对（官方文档） |
+| 输出 | 板载喇叭，经功放 | 已核对 |
+| 引脚复用 | GPIO 9 / 10 / 14 / 46 同时是 RGBLCD 的 G3 / G2 / R7 / G4 | 已核对；本板用 SPI 屏，无冲突。换 RGB 屏底板会冲突 |
+
+### 不可用 IO
+
+| GPIO | 原因 |
+|---|---|
+| 33–37 | Octal PSRAM 专用。官方表把 35 / 36 / 37 标「勿用」，33 / 34 未进分配表 |
+| 0 | BOOT 键 / XL9555 INT |
+| 19 / 20 | USB D- / D+（原生 USB-JTAG，占用后无法烧录与调试） |
+| 43 / 44 | UART0 TX / RX（日志口） |
+| 38 / 39 | 触摸 IC 的 I2C（`CT_SCL` / `CT_SDA`）。**不是 I2S 引脚**，网上另一套「38/39/40 为 I2S」的说法属 DNESP32S3B3（BOX3）底板，不适用本板 |
+| 41 / 42 | I2C0，XL9555 与 ES8388 共用 |
 
 XL9555 默认参数：
 

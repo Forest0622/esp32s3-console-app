@@ -1,5 +1,26 @@
 # 更新日志
 
+## v1.1.1 — 2026-11-17
+
+### 修正
+
+- `docs/board_pins.md` 补齐屏幕 SPI 引脚表与音频 ES8388 的 5 个 I2S 引脚。数据源为《DNESP32S3 硬件参考手册》表 1.2.2.1 IO 资源分配总表。
+- 交叉核对依据：该表与该板 V1.3 `board.h` 的 SPI 与 I2C 共 8 项逐项一致（MOSI 11 / SCLK 12 / MISO 13 / CS 21 / DC 40 / SDA 41 / SCL 42 / LED 1），据此采信音频 5 项。
+- I2S 引脚：MCLK=3、BCLK=46、LRCK=9、数据出=10、数据入=14。
+- 标注 I2S 数据脚按 Codec 侧命名：`I2S_SDIN`（GPIO10）对 ESP32 是输出，`I2S_SDOUT`（GPIO14）对 ESP32 是输入。写反不报错但无声。
+- 新增「不可用 IO」清单：33–37（Octal PSRAM，35/36/37 官方标勿用）、0（BOOT/XL9555 INT）、19/20（USB D-/D+）、43/44（UART0）、41/42（I2C0）。
+- 标注 GPIO 38/39 实为触摸 IC 的 `CT_SCL`/`CT_SDA`；网传「38/39/40 为 I2S」属 DNESP32S3B3（BOX3）底板，不适用本板。
+- 标注 GPIO 9/10/14/46 与 RGBLCD 的 G3/G2/R7/G4 复用，换 RGB 屏底板会冲突。
+- 标注 GPIO1 板载 LED 电平极性冲突：本文件原记低电平点亮，`board.h` 记高电平点亮，现改为待实测，不再写死 `ACTIVE_LOW=1`。
+- 标注 ES8388 I2C 地址 0x10 为待核实项，需上电扫 0x08–0x77 确认（应同时命中 0x10 与 0x20）。
+
+### 安装包
+
+- `ESP32-S3 检修台.dmg`，9,694,346 字节
+- SHA-256 `b20f0572ba4f8095c9a6163121a5d94448f875b60f0b58120e027582312ee4cb`
+- `.app` 16 MB，ad-hoc 签名，arm64，未公证
+- `hdiutil verify` 通过
+
 ## v1.1.0 — 2026-11-17
 
 ### 变更

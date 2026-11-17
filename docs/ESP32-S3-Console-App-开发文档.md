@@ -2,7 +2,7 @@
 
 > 版本：2026-11-17  
 > 代码根：`/Users/xiaoyi/个人/单片机/ESP-S3/Project/ESP32-S3-Console-App`  
-> App：`ESP32-S3 检修台`，bundle id `com.xiaoyi.esp32s3console`，版本 `1.1.0`  
+> App：`ESP32-S3 检修台`，bundle id `com.xiaoyi.esp32s3console`，版本 `1.1.1`  
 > 运行平台：macOS 12+，当前构建为 arm64  
 > 文档依据：本文按当前仓库代码重写。旧文档中的“两模式都必须备份”“仅 `-D` 注入”“采集 RESET”等说法已废弃，不再作为实现依据。
 
@@ -1058,7 +1058,7 @@ set(EXTRA_COMPONENT_DIRS "<work_copy>/components")
 |---|---|
 | `CFBundleName` / `CFBundleDisplayName` | `ESP32-S3 检修台` |
 | `CFBundleIdentifier` | `com.xiaoyi.esp32s3console` |
-| `CFBundleVersion` / `ShortVersion` | `VERSION` 文件的值（当前 `1.1.0`） |
+| `CFBundleVersion` / `ShortVersion` | `VERSION` 文件的值（当前 `1.1.1`） |
 | `CFBundleExecutable` | `console_shell` |
 | `CFBundleIconFile` | `AppIcon` |
 | `LSMinimumSystemVersion` | `12.0` |
@@ -1168,6 +1168,18 @@ set(EXTRA_COMPONENT_DIRS "<work_copy>/components")
 ---
 
 ## 18. 本轮变更
+
+### v1.1.1 — 2026-11-17 文档修正
+
+- `docs/board_pins.md` 补齐屏幕 SPI 引脚表与 ES8388 的 5 个 I2S 引脚。
+- 数据源：《DNESP32S3 硬件参考手册》表 1.2.2.1 IO 资源分配总表。该表与本板 V1.3 `board.h` 的 SPI / I2C 共 8 项逐项一致（11/12/13/21/40/41/42/1），据此采信音频 5 项。
+- I2S：MCLK=3、BCLK=46、LRCK=9、数据出=10、数据入=14。数据脚方向按 Codec 侧命名：`I2S_SDIN`(GPIO10) 对 ESP32 是输出，`I2S_SDOUT`(GPIO14) 对 ESP32 是输入；写反不报错但无声。
+- 新增「不可用 IO」清单：33–37（Octal PSRAM）、0（BOOT/XL9555 INT）、19/20（USB D-/D+）、41/42（I2C0）、43/44（UART0）、38/39（触摸 I2C）。
+- 澄清 GPIO 38/39/40 误传：实为 `CT_SCL` / `CT_SDA` / `LCD_DC`；网传「38/39/40 为 I2S」属 DNESP32S3B3（BOX3）底板。
+- 标注 GPIO 9/10/14/46 与 RGBLCD 的 G3/G2/R7/G4 复用，换 RGB 屏底板会冲突。
+- 标注 GPIO1 LED 电平极性两份文档冲突（本文件低电平、`board.h` 高电平），改为待实测，不再写死 `ACTIVE_LOW=1`。
+- 标注 ES8388 I2C 地址 `0x10` 为待核实项，需上电扫 `0x08–0x77` 确认。
+- 版本 `1.1.0` → `1.1.1`；重新打包并发布 `v1.1.1` Release。
 
 ### 2026-11-17
 
